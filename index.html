@@ -71,7 +71,16 @@ const total = () => order.tea*cfg.tea + order.coffee*cfg.coffee;
 /* ---------- குரல் வெளியீடு & உள்ளீடு ---------- */
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 let rec, listening = false, speaking = false, started = false, speakId = 0;
-let restartTimer, ttsTimer;
+let restartTimer, ttsTimer, startRetry = 0;
+
+// மாற்றுகளில் தெளிவில்லாத எண் உள்ளதை, எண் இல்லாத "பொருள் மட்டும்" மாற்று மூலம் தவிர்க்க முடியாது
+function pickAlt(alts){
+  const an = alts.map(analyze);
+  let i = an.findIndex(a => a.unclear || (a.item && a.explicit));  // தெளிவான எண் அல்லது தெளிவில்லா எண் உள்ள முதல் மாற்று
+  if (i < 0) i = an.findIndex(a => a.item);
+  if (i < 0) i = alts.findIndex(a => isYes(a) || isNo(a) || GREET.test(a));
+  return alts[i < 0 ? 0 : i];
+}
 
 // மைக் (மீண்டும்) தொடங்கும் ஒரே இடம்: recognition onend
 function onRecEnd(){
@@ -81,7 +90,10 @@ function onRecEnd(){
   restartTimer = setTimeout(() => {
     if (!started || speaking || listening) return;
     try { rec.start(); listening = true; }
-    catch(e) { stopSession(); $('heard').textContent = `மைக் பிழை: ${e.name}`; }
+    catch(e) {
+      if (startRetry++ < 1){ restartTimer = setTimeout(onRecEnd, 500); return; }  // ஒரே ஒரு மறுமுயற்சி
+      stopSession(); $('heard').textContent = `மைக் பிழை: ${e.name}`;
+    }
   }, 300);
 }
 function stopSession(){
@@ -90,6 +102,7 @@ function stopSession(){
   if (window.speechSynthesis) speechSynthesis.cancel();
   if (rec) rec.abort();
   $('start').textContent = '🎤 தொடங்கு';
+  $('heard').textContent = 'மைக் நிறுத்தப்பட்டது';
 }
 function speak(text){
   if (!window.speechSynthesis) return;
@@ -97,6 +110,7 @@ function speak(text){
   speaking = true;               // தன் குரலைத் தானே கேட்காமல் இருக்க
   clearTimeout(restartTimer); clearTimeout(ttsTimer);
   if (rec) rec.abort();
+  $('heard').textContent = '🔊 பொறுங்கள்…';
   speechSynthesis.cancel();
   const u = new SpeechSynthesisUtterance(text);
   u.lang = 'ta-IN';
@@ -116,10 +130,17 @@ if (SR){
   rec = new SR();
   rec.lang = 'ta-IN';
   rec.interimResults = false;
-  rec.onresult = e => { if (started && !speaking) handle(e.results[e.results.length-1][0].transcript); };
+  rec.maxAlternatives = 3;
+  rec.onstart = () => { startRetry = 0; if (started && !speaking) $('heard').textContent = '🎤 கேட்கிறது…'; };
+  rec.onresult = e => {
+    if (!started || speaking) return;
+    const alts = Array.from(e.results[e.results.length-1], a => a.transcript);
+    // எண்/டீ/காபி/சரி/இல்லை/வணக்கம் பொருந்தும் முதல் மாற்றைத் தேர்ந்தெடு
+    handle(pickAlt(alts));
+  };
   rec.onend = onRecEnd;
   rec.onerror = e => {
-    if (e.error === 'aborted' || e.error === 'no-speech') return;
+    if (e.error === 'aborted' || e.error === 'no-speech') return;  // மறைக்கப்படும்
     if (['not-allowed','service-not-allowed','audio-capture','language-not-supported','network'].includes(e.error)) stopSession();
     $('heard').textContent = `மைக் பிழை: ${e.error}` +
       (e.error === 'not-allowed' ? ' — HTTPS இணைப்பு மற்றும் Chrome மைக் அனுமதியைச் சரிபார்க்கவும்' : '');
@@ -187,66 +208,116 @@ function cancel(){ idle(); speak('ஆர்டர் ரத்து செய�
 /* ---------- பேச்சைப் புரிந்துகொள்ளுதல் ---------- */
 const isYes = t => /சரி|ச ரி|ஓகே|ஓக்கே|ஆமா|^\s*ஆம்|உறுதி|கன்ஃ?[பப]|கன்ஃபர்|confirm|conform|\bok(ay)?\b|\byes\b|\bsari\b/i.test(t);
 const isNo = t => /வேண்டாம்|வேணாம்|இல்ல|ரத்து|கேன்சல்|cancel|\bno\b/i.test(t);
-const hasItem = t => { const o = parseOrder(t.toLowerCase().replace(/(\d+)/g, ' $1 ').replace(/[.,!?]/g, ' ').split(/\s+/)); return o.tea || o.coffee; };
+const GREET = /வணக்கம்|vanakkam|ஹலோ|hello/i;
+const NUMRE = () => NUMS.flatMap(n => n[1]).filter(w => /[^\x00-\x7f]/.test(w)).sort((x, y) => y.length - x.length).join('|');
+let _numRe; // "இரண்டுடீ", "2டீ" போல ஒட்டிய சொற்களைப் பிரிக்கும்
+const words = text => {
+  _numRe = _numRe || new RegExp('(' + NUMRE() + ')(?=டீ|டி|காபி|காப்பி|காஃபி)', 'g');
+  return text.toLowerCase().replace(/(\d+)/g, ' $1 ').replace(/[.,!?]/g, ' ').replace(_numRe, '$1 ').split(/\s+/).filter(Boolean);
+};
+const hasItem = t => { const o = parseOrder(words(TAMIL_DIGITS(t.toLowerCase()))); return o.tea || o.coffee; };
 const NUMS = [
   [1,['இன்னொரு','ஒரு','ஒன்று','ஒன்னு','ஒண்ணு','one','a']],
-  [2,['இரண்டு','ரெண்டு','two']],
-  [3,['மூன்று','மூணு','three']],
+  [2,['இரண்டு','ரெண்டு','இரெண்டு','two']],
+  [3,['மூன்று','மூணு','மூனு','three']],
   [4,['நான்கு','நாலு','four']],
   [5,['ஐந்து','அஞ்சு','five']],
   [6,['ஆறு','six']],
   [7,['ஏழு','seven']],
   [8,['எட்டு','eight']],
   [9,['ஒன்பது','ஒம்பது','nine']],
-  [10,['பத்து','ten']]
+  [10,['பத்து','ten']],
+  [11,['பதினொன்று','பதினொன்னு','பதினொண்ணு','eleven']],
+  [12,['பன்னிரண்டு','பன்னெண்டு','பன்னிரெண்டு','twelve']],
+  [13,['பதிமூன்று','பதின்மூன்று','பதிமூணு','thirteen']],
+  [14,['பதினான்கு','பதினாலு','fourteen']],
+  [15,['பதினைந்து','பதினஞ்சு','பதினைஞ்சு','fifteen']],
+  [16,['பதினாறு','sixteen']],
+  [17,['பதினேழு','seventeen']],
+  [18,['பதினெட்டு','eighteen']],
+  [19,['பத்தொன்பது','பத்தொம்பது','nineteen']],
+  [20,['இருபது','இருவது','twenty']],
+  [25,['இருபத்தைந்து','இருபத்தஞ்சு','இருவத்தஞ்சு','இருவத்தைந்து']],
+  [30,['முப்பது','thirty']],
+  [40,['நாற்பது','நாப்பது','forty']],
+  [50,['ஐம்பது','அம்பது','fifty']],
+  [60,['அறுபது','sixty']], [70,['எழுபது','seventy']], [80,['எண்பது','eighty']], [90,['தொண்ணூறு','ninety']],
+  [100,['நூறு','hundred']], [200,['இருநூறு']], [300,['முன்னூறு']], [400,['நானூறு']], [500,['ஐநூறு','ஐந்நூறு']],
+  [600,['அறுநூறு']], [700,['எழுநூறு']], [800,['எண்ணூறு']], [900,['தொள்ளாயிரம்']], [1000,['ஆயிரம்','thousand']]
 ];
+// தெளிவில்லாத எண்கள்: எதிர்மறை, 0, தசமம், பின்னம், ஆதரிக்காத பெரிய/கூட்டு வடிவங்கள்
+const UNCLEAR_RE = /(^|[^\d.,])[-−–+]\s*\d|\d\s*[.,/]\s*\d|(^|\D)0+(?=\D|$)|பூஜ்ஜிய|பூஜ்ய|சுழி|zero|minus|negative|மைனஸ்|அரை|ஒன்றரை|இரண்டரை|மூன்றரை|நான்கரை|ஐந்தரை|ஆறரை|ஏழரை|எட்டரை|ஒன்பதரை|பத்தரை|கால்|முக்கால்|half|quarter|லட்சம்|இலட்சம்|கோடி|lakh|million|crore|நூற்று|நூற்றி|நூறாயிர|ஆயிரத்து|ஆயிரத்தி|[௦-௯]+\s*[.,/]/i;
+const TAMIL_DIGITS = t => t.replace(/[௦-௯]/g, c => c.charCodeAt(0) - 0x0BE6);
 const numOf = w => /^\d+$/.test(w) ? +w : (NUMS.find(n => n[1].includes(w)) || [0])[0];
 const itemOf = w => /^(டீ|டி$|டியு|டிகள்|தேநீர்|tea|tee$|ti$)/.test(w) ? 'tea' : /^(காபி|காப்பி|காஃபி|கோபி|coffee)/.test(w) ? 'coffee' : null;
 
-function parseOrder(words){
+// எண் பொருளுக்கு முன் ("2 டீ 1 காபி") அல்லது பின் ("டீ 2 காபி 1") வரலாம்; எண் இல்லையெனில் 1
+function parseDetail(words){
   const found = {tea:0, coffee:0};
-  let pending = 0;
-  for (let i = 0; i < words.length; i++){
-    const n = numOf(words[i]), item = itemOf(words[i]);
-    if (n) pending = n;
-    if (item){
-      let q = pending;
-      if (!q){
-        const next = numOf(words[i+1] || '');
-        if (next && !itemOf(words[i+2] || '')){ q = next; i++; }
-      }
-      found[item] += q || 1;
-      pending = 0;
-    }
-  }
-  return found;
+  const items = [], nums = [];
+  words.forEach((w, i) => {
+    const it = itemOf(w);
+    if (it){ items.push([i, it]); return; }
+    const n = numOf(w); if (!n) return;
+    const last = nums[nums.length-1];
+    // "இருபது ஐந்து" = 25, "நூறு ஐம்பது" = 150 (சொல் வடிவ எண்கள் அடுத்தடுத்து வந்தால் மட்டும்)
+    if (last && last[0] === i-1 && !/^\d+$/.test(w) && !/^\d+$/.test(words[i-1]) && last[1] % 10 === 0 && last[1] >= 20 && n < (last[1] >= 100 ? 100 : 10) && n % 100 !== 0) { last[0] = i; last[1] += n; return; }
+    nums.push([i, n]);
+  });
+  if (!items.length) return {found, explicit:false};
+  const after = nums.length && items[0][0] < nums[0][0];
+  let explicit = true;
+  items.forEach(([i, it], k) => {
+    const prevItem = k ? items[k-1][0] : -1, nextItem = k+1 < items.length ? items[k+1][0] : words.length;
+    let q = 0;
+    if (after) { const m = nums.find(([j]) => j > i && j < nextItem); if (m) q = m[1]; }
+    else { const m = nums.filter(([j]) => j < i && j > prevItem).pop(); if (m) q = m[1]; }
+    if (!q) explicit = false;
+    found[it] += q || 1;
+  });
+  return {found, explicit};
+}
+const parseOrder = words => parseDetail(words).found;
+// ஒரு வாக்கியத்தை மதிப்பிடு: unclear = பொருள் இருக்க, எண் தெளிவில்லை
+function analyze(text){
+  const raw = TAMIL_DIGITS(text.toLowerCase());
+  const d = parseDetail(words(raw));
+  const item = d.found.tea || d.found.coffee;
+  return {item, found:d.found, explicit:d.explicit, unclear: !!item && UNCLEAR_RE.test(raw)};
 }
 
+function askQty(msg){            // cart/நிலையை மாற்றாமல் மீண்டும் கேட்கும்
+  speak('எண்ணிக்கையை மீண்டும் சொல்லுங்கள்.');
+  $('heard').textContent = '❓ ' + msg;
+}
 function handle(text){
   $('heard').textContent = '🗣 ' + text;
-  const t = text.toLowerCase().replace(/(\d+)/g, ' $1 ').replace(/[.,!?]/g, ' ');
-  const words = t.replace(/(ஒரு|இரண்டு|ரெண்டு|மூணு|மூன்று|நாலு)(?=டீ|டி|காபி)/g, '$1 ').split(/\s+/).filter(Boolean);
-  const has = list => words.some(w => list.includes(w));
+  const t = TAMIL_DIGITS(text.toLowerCase()).replace(/(\d+)/g, ' $1 ').replace(/[.,!?]/g, ' ');
+  const w = words(text);
+  const has = list => w.some(x => list.includes(x));
   const no = has(['வேண்டாம்','வேணாம்','இல்லை','இல்ல','ரத்து','cancel','கேன்சல்','no']);
+  const A = analyze(text), o = A.found;
+  const gotItem = A.item;
 
-  if (state === 'done') return;
-  if (state === 'idle'){
-    if (/வணக்கம்|vanakkam|ஹலோ|hello/.test(t)) greet();
-    return;
-  }
+  if (state === 'pay'){ if (no) cancel(); return; }       // பணம் வந்ததைக் குரலால் உறுதி செய்ய முடியாது
+  if (gotItem && A.unclear && !no) return askQty('எண்ணிக்கை தெளிவில்லை: "' + text + '"');
+  if (state === 'done' && !gotItem) return;               // நன்றி சொல்லும் நேரம்; புது order இருந்தால் எடுக்கும்
+  if (state === 'idle' && !gotItem){ if (GREET.test(t)) greet(); return; }
+  if (no && !gotItem) return state === 'idle' ? undefined : cancel();
   if (no) return cancel();
-  if (state === 'pay') return;               // பணம் வந்ததைக் குரலால் உறுதி செய்ய முடியாது
 
-  const o = parseOrder(words);
-  if (o.tea || o.coffee){
-    const add = has(['இன்னும்','இன்னொரு','கூட','சேர்த்து','சேர்','also','more']) || words.includes('இன்னொன்னு');
-    const next = add ? {tea: order.tea + o.tea, coffee: order.coffee + o.coffee} : o;
-    if (next.tea > 50 || next.coffee > 50) return speak('எண்ணிக்கையை மீண்டும் சொல்லுங்கள்.');
+  if (gotItem){
+    const add = has(['இன்னும்','இன்னொரு','கூட','சேர்த்து','சேர்','also','more']) || w.includes('இன்னொன்னு');
+    const base = (state === 'order' || state === 'confirm') ? order : {tea:0, coffee:0};
+    const next = add ? {tea: base.tea + o.tea, coffee: base.coffee + o.coffee} : o;
+    const amt = next.tea*cfg.tea + next.coffee*cfg.coffee;
+    if (![next.tea, next.coffee, amt].every(Number.isSafeInteger))   // கணக்கிட முடியாத பெரிய எண் மட்டும்
+      return askQty('எண்ணிக்கை சரியில்லை');
     order = next;
     return showBill();
   }
   if (state === 'confirm' && isYes(t)) return pay();
-  if (/வணக்கம்|vanakkam|ஹலோ|hello/.test(t)) return greet();
+  if (GREET.test(t)) return greet();
 }
 
 /* ---------- பொத்தான்கள் & அமைப்புகள் ---------- */
