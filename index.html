@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="ta">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>குரல் டீ ஆர்டர்</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden;overscroll-behavior:none;touch-action:manipulation}
+body{font-family:system-ui,"Noto Sans Tamil",sans-serif;background:#3b1f10;color:#fff8ec;text-align:center}
+#app{position:fixed;top:0;left:0;right:0;height:100vh;height:100dvh;padding-bottom:20px!important;display:flex;flex-direction:column;padding:12px;gap:8px}
+header{display:flex;justify-content:space-between;align-items:center;font-weight:700}
+main{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2vh;overflow:hidden}
+#big{font-size:min(12vw,9vh);font-weight:800;line-height:1.35;color:#ffd166;white-space:pre-line}
+#big.bill{font-size:min(6.4vw,5vh);line-height:1.6}
+#sub{font-size:min(5.5vw,3.5vh);white-space:pre-line}
+#qr{display:none;background:#fff;padding:12px;border-radius:12px}
+#qr img,#qr canvas{width:min(78vw,34vh)!important;height:min(78vw,34vh)!important}
+#note{font-size:13px;opacity:.85}
+#heard{min-height:1.4em;opacity:.7;font-size:14px}
+footer{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+button{border:0;border-radius:12px;padding:11px 14px;font:700 17px inherit;background:#ffd166;color:#3b1f10}
+button.alt{background:#6b4330;color:#fff}
+button.ok{background:#2e9e55;color:#fff}
+[hidden]{display:none!important}
+#setup{position:fixed;inset:0;background:#3b1f10;display:flex;flex-direction:column;justify-content:center;gap:8px;padding:20px}
+#setup input{padding:10px;border-radius:8px;border:0;font-size:16px;width:100%}
+#setup label{text-align:left;font-size:14px}
+</style>
+</head>
+<body>
+<div id="app">
+  <header><span id="shop"></span><button class="alt" id="gear" aria-label="அமைப்புகள்">⚙️</button></header>
+  <main>
+    <div id="big"></div>
+    <div id="qr"></div>
+    <div id="sub"></div>
+    <div id="note" hidden>"பணம் வந்தது ✔" என்பது கடைக்காரரின் உறுதிப்படுத்தல் மட்டுமே; bank verification அல்ல.</div>
+  </main>
+  <div id="heard"></div>
+  <footer>
+    <button id="start">🎤 தொடங்கு</button>
+    <button class="alt" data-add="tea">+ டீ</button>
+    <button class="alt" data-add="coffee">+ காபி</button>
+    <button class="ok" id="confirm" hidden>✔ உறுதி</button>
+    <button class="ok" id="paid" hidden>கடைக்காரர்: பணம் வந்தது ✔</button>
+    <button class="alt" id="cancel" hidden>✖ ரத்து</button>
+  </footer>
+</div>
+
+<form id="setup" hidden>
+  <h2>கடை அமைப்புகள்</h2>
+  <label>கடை பெயர்<input id="sName" required></label>
+  <label>UPI ID<input id="sUpi" required placeholder="name@bank" pattern="[A-Za-z0-9._\-]+@[A-Za-z0-9.\-]+" autocapitalize="off"></label>
+  <label>டீ விலை ₹<input id="sTea" type="number" min="1" required></label>
+  <label>காபி விலை ₹<input id="sCoffee" type="number" min="1" required></label>
+  <button>சேமி</button>
+</form>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const KEY = 'voiceTeaCfg';
+const NAMES = {tea:'டீ', coffee:'காபி'};
+let cfg = {name:'எங்கள் டீ கடை', upi:'', tea:15, coffee:20};
+try { Object.assign(cfg, JSON.parse(localStorage.getItem(KEY) || '{}')); } catch(e) {}
+
+let state = 'idle', order = {tea:0, coffee:0}, resetTimer;
+const total = () => order.tea*cfg.tea + order.coffee*cfg.coffee;
+
+/* ---------- குரல் வெளியீடு & உள்ளீடு ---------- */
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let rec, listening = false, speaking = false, started = false, speakId = 0;
+let restartTimer, ttsTimer;
+
+// மைக் (மீண்டும்) தொடங்கும் ஒரே இடம்: recognition onend
+function onRecEnd(){
+  listening = false;
+  clearTimeout(restartTimer);
+  if (!started || speaking) return;
+  restartTimer = setTimeout(() => {
+    if (!started || speaking || listening) return;
+    try { rec.start(); listening = true; }
+    catch(e) { stopSession(); $('heard').textContent = `மைக் பிழை: ${e.name}`; }
+  }, 300);
+}
+function stopSession(){
+  started = false; speaking = false; speakId++;
+  clearTimeout(restartTimer); clearTimeout(ttsTimer);
+  if (window.speechSynthesis) speechSynthesis.cancel();
+  if (rec) rec.abort();
+  $('start').textContent = '🎤 தொடங்கு';
+}
+function speak(text){
+  if (!window.speechSynthesis) return;
+  const id = ++speakId;
+  speaking = true;               // தன் குரலைத் தானே கேட்காமல் இருக்க
+  clearTimeout(restartTimer); clearTimeout(ttsTimer);
+  if (rec) rec.abort();
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = 'ta-IN';
+  const v = speechSynthesis.getVoices().find(v => v.lang.startsWith('ta'));
+  if (v) u.voice = v;
+  const done = () => {
+    if (id !== speakId) return;
+    speakId++; speaking = false; clearTimeout(ttsTimer);
+    if (!listening) onRecEnd();  // abort இன்னும் முடியவில்லை என்றால் onend தானாக வரும்
+  };
+  u.onend = u.onerror = done;
+  // TTS onend வராத போன்களுக்கு: ஒலியை நிறுத்திய பிறகே தொடரும்
+  ttsTimer = setTimeout(() => { speechSynthesis.cancel(); done(); }, 2500 + text.length*130);
+  speechSynthesis.speak(u);
+}
+if (SR){
+  rec = new SR();
+  rec.lang = 'ta-IN';
+  rec.interimResults = false;
+  rec.onresult = e => { if (started && !speaking) handle(e.results[e.results.length-1][0].transcript); };
+  rec.onend = onRecEnd;
+  rec.onerror = e => {
+    if (e.error === 'aborted' || e.error === 'no-speech') return;
+    if (['not-allowed','service-not-allowed','audio-capture','language-not-supported','network'].includes(e.error)) stopSession();
+    $('heard').textContent = `மைக் பிழை: ${e.error}` +
+      (e.error === 'not-allowed' ? ' — HTTPS இணைப்பு மற்றும் Chrome மைக் அனுமதியைச் சரிபார்க்கவும்' : '');
+  };
+}
+
+/* ---------- திரைகள் ---------- */
+function show(s, big, sub){
+  state = s;
+  clearTimeout(resetTimer);
+  $('big').textContent = big;
+  $('big').classList.toggle('bill', s === 'confirm');
+  $('sub').textContent = sub;
+  $('qr').style.display = s === 'pay' ? 'block' : 'none';
+  $('note').hidden = !(s === 'pay' || s === 'done');
+  $('confirm').hidden = s !== 'confirm';
+  $('paid').hidden = s !== 'pay';
+  $('cancel').hidden = !(s === 'confirm' || s === 'pay');
+  document.querySelectorAll('[data-add]').forEach(b => b.hidden = s === 'pay' || s === 'done');
+}
+function idle(){
+  order = {tea:0, coffee:0};
+  show('idle', 'வணக்கம் 🙏', `"வணக்கம்" சொல்லுங்கள்\nடீ ₹${cfg.tea}  •  காபி ₹${cfg.coffee}`);
+}
+function greet(){
+  show('order', 'வணக்கம் 🙏', 'எங்களிடம் டீ மற்றும் காபி உள்ளது.\nஉங்களுக்கு என்ன வேண்டும்?');
+  speak('வணக்கம். எங்களிடம் டீ மற்றும் காபி உள்ளது. உங்களுக்கு என்ன வேண்டும்?');
+}
+function showBill(){
+  const items = Object.keys(order).filter(k => order[k]);
+  const lines = items.map(k => `${order[k]} ${NAMES[k]} × ₹${cfg[k]} = ₹${order[k]*cfg[k]}`);
+  if (items.length > 1) lines.push(`மொத்தம் ₹${total()}`);
+  show('confirm', lines.join('\n'), '"சரி" அல்லது "கன்ஃபார்ம்" என்று சொல்லுங்கள்');
+  const said = items.map(k => `${order[k]} ${NAMES[k]}`).join(' மற்றும் ');
+  speak(`${said}. மொத்தம் ${total()} ரூபாய். சரி என்று சொல்லுங்கள்.`);
+}
+function upiLink(amt){
+  const q = {pa: cfg.upi.trim(), pn: cfg.name.trim(), am: amt.toFixed(2), cu: 'INR', tn: 'Tea order'};
+  return 'upi://pay?' + Object.entries(q)
+    .map(([k,v]) => `${k}=${encodeURIComponent(v).replace(/%40/g,'@')}`).join('&');
+}
+function pay(){
+  if (!cfg.upi) return openSetup();
+  if (!window.QRCode){
+    $('sub').textContent = 'QR ஏற்றப்படவில்லை. இணையத்தைச் சரிபார்க்கவும்.';
+    return;
+  }
+  const amt = total();
+  $('qr').innerHTML = '';
+  new QRCode($('qr'), {
+    text: upiLink(amt),
+    width: 600, height: 600, correctLevel: QRCode.CorrectLevel.M
+  });
+  show('pay', `₹${amt}`, 'QR ஸ்கேன் செய்து பணம் செலுத்துங்கள்');
+  speak(`${amt} ரூபாய். கியூ ஆர் கோடை ஸ்கேன் செய்து பணம் செலுத்துங்கள்.`);
+}
+// கடைக்காரர் தன் UPI ஆப் / சவுண்ட் பாக்ஸில் பணம் வந்ததைப் பார்த்த பிறகே அழுத்த வேண்டும்
+function paid(){
+  show('done', '✅\nஉங்கள் பேமெண்ட் கன்ஃபார்ம் ஆகிவிட்டது', 'நன்றி 🙏');
+  speak('உங்கள் பேமெண்ட் கன்ஃபார்ம் ஆகிவிட்டது. நன்றி.');
+  resetTimer = setTimeout(idle, 8000);
+}
+function cancel(){ idle(); speak('ஆர்டர் ரத்து செய்யப்பட்டது.'); }
+
+/* ---------- பேச்சைப் புரிந்துகொள்ளுதல் ---------- */
+const isYes = t => /சரி|ச ரி|ஓகே|ஓக்கே|ஆமா|^\s*ஆம்|உறுதி|கன்ஃ?[பப]|கன்ஃபர்|confirm|conform|\bok(ay)?\b|\byes\b|\bsari\b/i.test(t);
+const isNo = t => /வேண்டாம்|வேணாம்|இல்ல|ரத்து|கேன்சல்|cancel|\bno\b/i.test(t);
+const hasItem = t => { const o = parseOrder(t.toLowerCase().replace(/(\d+)/g, ' $1 ').replace(/[.,!?]/g, ' ').split(/\s+/)); return o.tea || o.coffee; };
+const NUMS = [
+  [1,['இன்னொரு','ஒரு','ஒன்று','ஒன்னு','ஒண்ணு','one','a']],
+  [2,['இரண்டு','ரெண்டு','two']],
+  [3,['மூன்று','மூணு','three']],
+  [4,['நான்கு','நாலு','four']],
+  [5,['ஐந்து','அஞ்சு','five']],
+  [6,['ஆறு','six']],
+  [7,['ஏழு','seven']],
+  [8,['எட்டு','eight']],
+  [9,['ஒன்பது','ஒம்பது','nine']],
+  [10,['பத்து','ten']]
+];
+const numOf = w => /^\d+$/.test(w) ? +w : (NUMS.find(n => n[1].includes(w)) || [0])[0];
+const itemOf = w => /^(டீ|டி$|டியு|டிகள்|தேநீர்|tea|tee$|ti$)/.test(w) ? 'tea' : /^(காபி|காப்பி|காஃபி|கோபி|coffee)/.test(w) ? 'coffee' : null;
+
+function parseOrder(words){
+  const found = {tea:0, coffee:0};
+  let pending = 0;
+  for (let i = 0; i < words.length; i++){
+    const n = numOf(words[i]), item = itemOf(words[i]);
+    if (n) pending = n;
+    if (item){
+      let q = pending;
+      if (!q){
+        const next = numOf(words[i+1] || '');
+        if (next && !itemOf(words[i+2] || '')){ q = next; i++; }
+      }
+      found[item] += q || 1;
+      pending = 0;
+    }
+  }
+  return found;
+}
+
+function handle(text){
+  $('heard').textContent = '🗣 ' + text;
+  const t = text.toLowerCase().replace(/(\d+)/g, ' $1 ').replace(/[.,!?]/g, ' ');
+  const words = t.replace(/(ஒரு|இரண்டு|ரெண்டு|மூணு|மூன்று|நாலு)(?=டீ|டி|காபி)/g, '$1 ').split(/\s+/).filter(Boolean);
+  const has = list => words.some(w => list.includes(w));
+  const no = has(['வேண்டாம்','வேணாம்','இல்லை','இல்ல','ரத்து','cancel','கேன்சல்','no']);
+
+  if (state === 'done') return;
+  if (state === 'idle'){
+    if (/வணக்கம்|vanakkam|ஹலோ|hello/.test(t)) greet();
+    return;
+  }
+  if (no) return cancel();
+  if (state === 'pay') return;               // பணம் வந்ததைக் குரலால் உறுதி செய்ய முடியாது
+
+  const o = parseOrder(words);
+  if (o.tea || o.coffee){
+    const add = has(['இன்னும்','இன்னொரு','கூட','சேர்த்து','சேர்','also','more']) || words.includes('இன்னொன்னு');
+    const next = add ? {tea: order.tea + o.tea, coffee: order.coffee + o.coffee} : o;
+    if (next.tea > 50 || next.coffee > 50) return speak('எண்ணிக்கையை மீண்டும் சொல்லுங்கள்.');
+    order = next;
+    return showBill();
+  }
+  if (state === 'confirm' && isYes(t)) return pay();
+  if (/வணக்கம்|vanakkam|ஹலோ|hello/.test(t)) return greet();
+}
+
+/* ---------- பொத்தான்கள் & அமைப்புகள் ---------- */
+function openSetup(){
+  $('sName').value = cfg.name; $('sUpi').value = cfg.upi;
+  $('sTea').value = cfg.tea; $('sCoffee').value = cfg.coffee;
+  $('setup').hidden = false;
+}
+$('setup').onsubmit = e => {
+  e.preventDefault();
+  cfg = {name:$('sName').value.trim(), upi:$('sUpi').value.trim(), tea:+$('sTea').value|0, coffee:+$('sCoffee').value|0};
+  try { localStorage.setItem(KEY, JSON.stringify(cfg)); } catch(err) {}
+  $('shop').textContent = cfg.name;
+  $('setup').hidden = true;
+  idle();
+};
+$('gear').onclick = openSetup;
+$('start').onclick = () => {
+  if (started){ stopSession(); $('heard').textContent = 'மைக் நிறுத்தப்பட்டது'; return; }
+  if (!rec){ $('heard').textContent = 'இந்த பிரவுசரில் குரல் வசதி இல்லை. Chrome பயன்படுத்தவும்.'; return; }
+  started = true; $('start').textContent = '⏹ நிறுத்து';
+  $('heard').textContent = '';
+  speak('தயார். வணக்கம் சொல்லுங்கள்.');
+  if (!speaking) onRecEnd();
+  if (navigator.wakeLock) navigator.wakeLock.request('screen').catch(()=>{});
+};
+document.querySelectorAll('[data-add]').forEach(b => b.onclick = () => { order[b.dataset.add]++; showBill(); });
+$('confirm').onclick = pay;
+$('paid').onclick = paid;
+$('cancel').onclick = cancel;
+document.addEventListener('touchmove', e => e.preventDefault(), {passive:false});
+
+$('shop').textContent = cfg.name;
+idle();
+if (!cfg.upi) openSetup();
+</script>
+</body>
+</html>
