@@ -10,13 +10,14 @@ html,body{height:100%;overflow:hidden;overscroll-behavior:none;touch-action:mani
 body{font-family:system-ui,"Noto Sans Tamil",sans-serif;background:#3b1f10;color:#fff8ec;text-align:center}
 #app{position:fixed;top:0;left:0;right:0;height:100vh;height:100dvh;padding-bottom:20px!important;display:flex;flex-direction:column;padding:12px;gap:8px}
 header{display:flex;justify-content:space-between;align-items:center;font-weight:700}
-main{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2vh;overflow:hidden}
+main{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:safe center;gap:1.2vh;overflow-y:auto;overflow-x:hidden;width:100%}
 #big{font-size:min(12vw,9vh);font-weight:800;line-height:1.35;color:#ffd166;white-space:pre-line}
 #big.bill{font-size:min(6.4vw,5vh);line-height:1.6}
 #sub{font-size:min(5.5vw,3.5vh);white-space:pre-line}
 #qr{display:none;background:#fff;padding:12px;border-radius:12px}
-#qr img,#qr canvas{width:min(78vw,34vh)!important;height:min(78vw,34vh)!important}
-#note{font-size:13px;opacity:.85}
+#qr{padding:8px}
+#qr img,#qr canvas{width:min(62vw,25vh)!important;height:min(62vw,25vh)!important}
+#note{font-size:13px;opacity:.95;line-height:1.35;padding:0 6px}
 #heard{min-height:1.4em;opacity:.7;font-size:14px}
 footer{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
 button{border:0;border-radius:12px;padding:11px 14px;font:700 17px inherit;background:#ffd166;color:#3b1f10}
@@ -25,6 +26,15 @@ button.alt{background:#6b4330;color:#fff}
 #mute{font-size:14px}
 button.ok{background:#2e9e55;color:#fff}
 [hidden]{display:none!important}
+#hist{position:fixed;inset:0;background:#3b1f10;display:flex;flex-direction:column;gap:8px;padding:12px;text-align:left;overflow-y:auto;-webkit-overflow-scrolling:touch}
+#hist .hh{display:flex;gap:8px;align-items:center;justify-content:space-between;font-size:18px}
+#sum{white-space:pre-line;font-size:17px;line-height:1.6;background:#4d2c1a;border-radius:12px;padding:10px}
+.row{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:15px;border-bottom:1px solid #6b4330;padding:5px 0}
+.row span{flex:1;min-width:60%}
+.row button{padding:6px 10px;font-size:14px}
+.bk{display:flex;gap:8px;flex-wrap:wrap}
+.bk button{font-size:15px;padding:9px 12px}
+#bkNote{font-size:13px;opacity:.85;white-space:pre-line}
 #setup{position:fixed;inset:0;background:#3b1f10;display:flex;flex-direction:column;justify-content:center;gap:8px;padding:20px}
 #setup input{padding:10px;border-radius:8px;border:0;font-size:16px;width:100%}
 #setup label{text-align:left;font-size:14px}
@@ -32,7 +42,7 @@ button.ok{background:#2e9e55;color:#fff}
 </head>
 <body>
 <div id="app">
-  <header><span id="shop"></span><span class="hbtns"><button class="alt" id="mute" aria-label="குரல் பதில்">🔊 குரல்</button><button class="alt" id="gear" aria-label="அமைப்புகள்">⚙️</button></span></header>
+  <header><span id="shop"></span><span class="hbtns"><button class="alt" id="book" aria-label="கணக்கு">📒</button><button class="alt" id="mute" aria-label="குரல் பதில்">🔊 குரல்</button><button class="alt" id="gear" aria-label="அமைப்புகள்">⚙️</button></span></header>
   <main>
     <div id="big"></div>
     <div id="qr"></div>
@@ -45,9 +55,23 @@ button.ok{background:#2e9e55;color:#fff}
     <button class="alt" data-add="tea">+ டீ</button>
     <button class="alt" data-add="coffee">+ காபி</button>
     <button class="ok" id="confirm" hidden>✔ உறுதி</button>
-    <button class="ok" id="paid" hidden>கடைக்காரர்: பணம் வந்தது ✔</button>
+    <button class="ok" id="paid" hidden>கடைக்காரர்: UPI பணம் வந்தது ✔</button>
+    <button class="ok" id="cash" hidden>💵 Cash வந்தது ✔</button>
     <button class="alt" id="cancel" hidden>✖ ரத்து</button>
   </footer>
+</div>
+
+<div id="hist" hidden>
+  <div class="hh"><button class="alt" id="dPrev">◀</button><b id="dLbl"></b><button class="alt" id="dNext">▶</button><button class="alt" id="hClose">✖ மூடு</button></div>
+  <div id="sum"></div>
+  <div id="rows"></div>
+  <div class="bk">
+    <button id="bJson">⬇ Backup (JSON)</button>
+    <button class="alt" id="bCsv">⬇ CSV</button>
+    <button class="alt" id="bRestore">⬆ Restore</button>
+  </div>
+  <div id="bkNote"></div>
+  <input type="file" id="bFile" accept=".json,application/json" hidden>
 </div>
 
 <form id="setup" hidden>
@@ -57,6 +81,7 @@ button.ok{background:#2e9e55;color:#fff}
   <label>டீ விலை ₹<input id="sTea" type="number" min="1" required></label>
   <label>காபி விலை ₹<input id="sCoffee" type="number" min="1" required></label>
   <button>சேமி</button>
+  <button type="button" class="alt" id="sCancel">மூடு</button>
 </form>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
@@ -67,7 +92,44 @@ const NAMES = {tea:'டீ', coffee:'காபி'};
 let cfg = {name:'எங்கள் டீ கடை', upi:'', tea:15, coffee:20};
 try { Object.assign(cfg, JSON.parse(localStorage.getItem(KEY) || '{}')); } catch(e) {}
 
-let state = 'idle', order = {tea:0, coffee:0}, resetTimer;
+let state = 'idle', order = {tea:0, coffee:0}, resetTimer, cur = null;
+
+/* ---------- கணக்குப் பதிவு (இந்த போனில் மட்டும்) ---------- */
+const LKEY = 'voiceTeaLog', BKEY = 'voiceTeaBackup';
+let log = [], storeErr = false;
+try { const a = JSON.parse(localStorage.getItem(LKEY) || '[]'); if (Array.isArray(a)) log = a.filter(okRec); } catch(e) {}
+function okRec(r){
+  return r && typeof r.id === 'string' && Number.isFinite(r.ts) &&
+    Number.isSafeInteger(r.tea) && r.tea >= 0 && Number.isSafeInteger(r.coffee) && r.coffee >= 0 &&
+    Number.isSafeInteger(r.amt) && r.amt >= 0 &&
+    ['pending','received','cancelled'].includes(r.status) &&
+    (r.status === 'received' ? ['cash','upi'].includes(r.method) : !r.method);
+}
+function saveLog(){
+  try { localStorage.setItem(LKEY, JSON.stringify(log)); storeErr = false; return true; }
+  catch(e) { storeErr = true; showBook(); $('heard').textContent = '⚠ கணக்கைச் சேமிக்க முடியவில்லை (இடம் / தனிப்பட்ட மோடு)'; return false; }
+}
+function newRec(){
+  cur = {id: Date.now().toString(36) + Math.random().toString(36).slice(2,6), ts: Date.now(),
+         tea: order.tea, coffee: order.coffee, amt: total(), status: 'pending'};
+  log.push(cur); saveLog();
+}
+function setStatus(r, status, method){
+  r.status = status;
+  if (status === 'received'){ r.method = method; r.paidAt = Date.now(); } else delete r.method;
+  saveLog();
+}
+const p2 = n => String(n).padStart(2,'0');
+const dayKey = ts => { const d = new Date(ts); return d.getFullYear() + '-' + p2(d.getMonth()+1) + '-' + p2(d.getDate()); };
+function daySummary(key){
+  const recs = log.filter(r => dayKey(r.ts) === key).sort((a,b) => a.ts - b.ts);
+  const live = recs.filter(r => r.status !== 'cancelled');
+  const sum = f => live.filter(f).reduce((t,r) => t + r.amt, 0);
+  return {recs, tea: live.reduce((t,r) => t + r.tea, 0), coffee: live.reduce((t,r) => t + r.coffee, 0),
+    sales: sum(() => true), cash: sum(r => r.status === 'received' && r.method === 'cash'),
+    upi: sum(r => r.status === 'received' && r.method === 'upi'), pend: live.filter(r => r.status === 'pending'),
+    cancelled: recs.length - live.length};
+}
 const total = () => order.tea*cfg.tea + order.coffee*cfg.coffee;
 
 /* ---------- குரல் வெளியீடு & உள்ளீடு ---------- */
@@ -163,10 +225,12 @@ function show(s, big, sub){
   $('note').hidden = !(s === 'pay' || s === 'done');
   $('confirm').hidden = s !== 'confirm';
   $('paid').hidden = s !== 'pay';
+  $('cash').hidden = !(s === 'confirm' || s === 'pay');
   $('cancel').hidden = !(s === 'confirm' || s === 'pay');
   document.querySelectorAll('[data-add]').forEach(b => b.hidden = s === 'pay' || s === 'done');
 }
 function idle(){
+  cur = null;
   order = {tea:0, coffee:0};
   show('idle', 'வணக்கம் 🙏', `"வணக்கம்" சொல்லுங்கள்\nடீ ₹${cfg.tea}  •  காபி ₹${cfg.coffee}`);
 }
@@ -199,16 +263,46 @@ function pay(){
     text: upiLink(amt),
     width: 600, height: 600, correctLevel: QRCode.CorrectLevel.M
   });
+  newRec();
   show('pay', `₹${amt}`, 'QR ஸ்கேன் செய்து பணம் செலுத்துங்கள்');
   speak(`${amt} ரூபாய். கியூ ஆர் கோடை ஸ்கேன் செய்து பணம் செலுத்துங்கள்.`);
 }
 // கடைக்காரர் தன் UPI ஆப் / சவுண்ட் பாக்ஸில் பணம் வந்ததைப் பார்த்த பிறகே அழுத்த வேண்டும்
-function paid(){
-  show('done', '✅\nஉங்கள் பேமெண்ட் கன்ஃபார்ம் ஆகிவிட்டது', 'நன்றி 🙏');
-  speak('உங்கள் பேமெண்ட் கன்ஃபார்ம் ஆகிவிட்டது. நன்றி.');
+function paid(method){
+  method = method === 'cash' ? 'cash' : 'upi';
+  if (!total()) return;
+  if (!cur) newRec();             // Cash: QR இல்லாமலே உறுதிப் பக்கத்திலிருந்து
+  setStatus(cur, 'received', method);
+  const cash = method === 'cash';
+  show('done', cash ? '✅\nCash பெற்றுக்கொண்டோம்' : '✅\nஉங்கள் பேமெண்ட் கன்ஃபார்ம் ஆகிவிட்டது', 'நன்றி 🙏');
+  speak(cash ? 'பணம் பெற்றுக்கொண்டோம். நன்றி.' : 'உங்கள் பேமெண்ட் கன்ஃபார்ம் ஆகிவிட்டது. நன்றி.');
+  cur = null;
   resetTimer = setTimeout(idle, 8000);
 }
-function cancel(){ idle(); speak('ஆர்டர் ரத்து செய்யப்பட்டது.'); }
+function cancel(){ if (cur && cur.status === 'pending') setStatus(cur, 'cancelled'); idle(); speak('ஆர்டர் ரத்து செய்யப்பட்டது.'); }
+
+/* ---------- குரலால் திருத்தம்: "ஒரு டீ குறை", "காபி வேண்டாம், டீ மட்டும்" ---------- */
+const isNegW = w => ['வேண்டாம்','வேணாம்','இல்லை','இல்ல','ரத்து','கேன்சல்','cancel','no'].includes(w);
+const isRedW = w => /^(குறை|எடு|நீக்க|remove|less)/.test(w);
+const isOnlyW = w => /^(மட்டும்|மட்டுமே|only)/.test(w);
+// திருத்தம் இல்லையெனில் null; இருந்தால் புதிய கூடை
+function correction(w, base){
+  const idx = []; w.forEach((x,i) => { if (itemOf(x)) idx.push(i); });
+  if (!idx.length) return null;
+  const next = {tea:base.tea, coffee:base.coffee};
+  let hit = false, only = null;
+  idx.forEach((i, k) => {
+    const it = itemOf(w[i]), prev = k ? idx[k-1] : -1, nx = k+1 < idx.length ? idx[k+1] : w.length;
+    const post = w.slice(i+1, nx), pre = w.slice(prev+1, i);
+    const neg = post.some(isNegW) || (!k && pre.some(isNegW));
+    const red = post.some(isRedW) || (!k && pre.some(isRedW));
+    if (post.some(isOnlyW)) { only = it; hit = true; }
+    if (neg){ next[it] = 0; hit = true; }
+    else if (red){ next[it] = Math.max(0, next[it] - (parseDetail([...pre, w[i]]).found[it])); hit = true; }
+  });
+  if (only) Object.keys(next).forEach(k => { if (k !== only) next[k] = 0; });
+  return hit ? next : null;
+}
 
 /* ---------- பேச்சைப் புரிந்துகொள்ளுதல் ---------- */
 const isYes = t => /சரி|ச ரி|ஓகே|ஓக்கே|ஆமா|^\s*ஆம்|உறுதி|கன்ஃ?[பப]|கன்ஃபர்|confirm|conform|\bok(ay)?\b|\byes\b|\bsari\b/i.test(t);
@@ -306,6 +400,13 @@ function handle(text){
 
   if (state === 'pay'){ if (no) cancel(); return; }       // பணம் வந்ததைக் குரலால் உறுதி செய்ய முடியாது
   if (gotItem && A.unclear && !no) return askQty('எண்ணிக்கை தெளிவில்லை: "' + text + '"');
+  if (gotItem && (state === 'order' || state === 'confirm') && (order.tea || order.coffee)){
+    const c = correction(w, order);
+    if (c){
+      if (!c.tea && !c.coffee) return cancel();
+      order = c; return showBill();
+    }
+  }
   if (state === 'done' && !gotItem) return;               // நன்றி சொல்லும் நேரம்; புது order இருந்தால் எடுக்கும்
   if (state === 'idle' && !gotItem){ if (GREET.test(t)) greet(); return; }
   if (no && !gotItem) return state === 'idle' ? undefined : cancel();
@@ -359,9 +460,97 @@ $('start').onclick = () => {
 };
 document.querySelectorAll('[data-add]').forEach(b => b.onclick = () => { order[b.dataset.add]++; showBill(); });
 $('confirm').onclick = pay;
-$('paid').onclick = paid;
+$('paid').onclick = () => paid('upi');
+$('cash').onclick = () => paid('cash');
+$('sCancel').onclick = () => { if (cfg.upi) $('setup').hidden = true; };
 $('cancel').onclick = cancel;
-document.addEventListener('touchmove', e => e.preventDefault(), {passive:false});
+document.addEventListener('touchmove', e => { if (!(e.target.closest && e.target.closest('#hist, main'))) e.preventDefault(); }, {passive:false});
+
+/* ---------- கணக்குத் திரை & backup ---------- */
+let viewDay = dayKey(Date.now());
+const lastBackup = () => { try { return +localStorage.getItem(BKEY) || 0; } catch(e) { return 0; } };
+const backupDue = () => log.length > 0 && Date.now() - lastBackup() > 7*864e5;
+function showBook(){ $('book').textContent = storeErr ? '📒❗' : backupDue() ? '📒⚠' : '📒'; }
+function shiftDay(n){ const [y,m,d] = viewDay.split('-').map(Number); viewDay = dayKey(new Date(y, m-1, d+n).getTime()); renderHist(); }
+const STXT = r => r.status === 'received' ? (r.method === 'cash' ? '✔ Cash' : '✔ UPI') : r.status === 'pending' ? '⏳ பணம் பெறவில்லை' : '✖ ரத்து';
+function renderHist(){
+  const S = daySummary(viewDay), today = dayKey(Date.now());
+  $('dLbl').textContent = viewDay === today ? 'இன்று ' + viewDay : viewDay;
+  $('dNext').disabled = viewDay >= today;
+  const rcv = S.cash + S.upi;
+  $('sum').textContent =
+    `டீ: ${S.tea}   காபி: ${S.coffee}\n` +
+    `மொத்த விற்பனை: ₹${S.sales}\n` +
+    `பணம் பெற்றது: ₹${rcv}  (Cash ₹${S.cash} + UPI ₹${S.upi})\n` +
+    `பணம் பெறாதது: ₹${S.sales - rcv}` + (S.pend.length ? ` (${S.pend.length} ஆர்டர்)` : '') +
+    (S.cancelled ? `\nரத்து: ${S.cancelled}` : '') +
+    `\n(கடைக்காரர் அழுத்திய பதிவு மட்டும்; bank சரிபார்ப்பு அல்ல)`;
+  const rows = $('rows'); rows.textContent = '';
+  S.recs.slice().reverse().forEach(r => {
+    const d = new Date(r.ts), div = document.createElement('div'), sp = document.createElement('span');
+    div.className = 'row';
+    const what = [r.tea ? r.tea + ' டீ' : '', r.coffee ? r.coffee + ' காபி' : ''].filter(Boolean).join(' + ');
+    sp.textContent = `${p2(d.getHours())}:${p2(d.getMinutes())}  ${what}  ₹${r.amt}  ${STXT(r)}`;
+    div.appendChild(sp);
+    if (r.status === 'pending') [['Cash','cash'],['UPI','upi']].forEach(([l,m]) => {
+      const b = document.createElement('button'); b.className = 'ok'; b.textContent = l + ' ✔';
+      b.onclick = () => { setStatus(r, 'received', m); renderHist(); }; div.appendChild(b);
+    });
+    if (r.status === 'pending'){
+      const b = document.createElement('button'); b.className = 'alt'; b.textContent = '✖';
+      b.onclick = () => { setStatus(r, 'cancelled'); renderHist(); }; div.appendChild(b);
+    }
+    rows.appendChild(div);
+  });
+  $('bkNote').textContent = backupDue()
+    ? '⚠ Backup எடுக்கவும்: ' + (lastBackup() ? 'கடைசி backup ' + dayKey(lastBackup()) : 'இன்னும் எடுக்கவில்லை')
+    : (lastBackup() ? 'கடைசி backup: ' + dayKey(lastBackup()) : '') ;
+  if (storeErr) $('bkNote').textContent = '❗ கணக்கைச் சேமிக்க முடியவில்லை; உடனே Backup எடுக்கவும்.\n' + $('bkNote').textContent;
+  $('bkNote').textContent += '\nபதிவுகள் இந்த போன் / Chrome-இல் மட்டும் உள்ளன; Chrome data அழிந்தால் போகும். Backup (UPI ID இல்லை) எடுத்து வைக்கவும்.';
+  showBook();
+}
+function openBook(){ viewDay = dayKey(Date.now()); renderHist(); $('hist').hidden = false; }
+$('book').onclick = openBook;
+$('hClose').onclick = () => { $('hist').hidden = true; };
+$('dPrev').onclick = () => shiftDay(-1);
+$('dNext').onclick = () => shiftDay(1);
+function download(name, text, type){
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], {type}));
+  a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+}
+function noteBackup(){ try { localStorage.setItem(BKEY, String(Date.now())); } catch(e) {} }
+$('bJson').onclick = () => {
+  download(`voice-tea-backup-${dayKey(Date.now())}.json`, JSON.stringify({app:'voice-tea', v:1, exported:Date.now(), orders:log}), 'application/json');
+  noteBackup(); renderHist();
+};
+$('bCsv').onclick = () => {
+  const head = 'date,time,tea,coffee,amount,status,method';
+  const rows = log.slice().sort((a,b) => a.ts - b.ts).map(r => { const d = new Date(r.ts);
+    return [dayKey(r.ts), p2(d.getHours()) + ':' + p2(d.getMinutes()), r.tea, r.coffee, r.amt, r.status, r.method || ''].join(','); });
+  download(`voice-tea-${dayKey(Date.now())}.csv`, [head, ...rows].join('\n'), 'text/csv');
+};
+$('bRestore').onclick = () => $('bFile').click();
+$('bFile').onchange = e => {
+  const f = e.target.files[0]; e.target.value = '';
+  if (!f) return;
+  const fr = new FileReader();
+  fr.onload = () => {
+    try {
+      const j = JSON.parse(fr.result);
+      if (!j || j.app !== 'voice-tea' || !Array.isArray(j.orders)) throw 0;
+      const have = new Set(log.map(r => r.id));
+      const add = j.orders.filter(r => okRec(r) && !have.has(r.id));
+      const bad = j.orders.length - j.orders.filter(okRec).length;
+      log = log.concat(add); saveLog(); renderHist();
+      $('bkNote').textContent = `Restore: ${add.length} புதிய பதிவுகள் சேர்க்கப்பட்டன` + (bad ? `, ${bad} தவறானவை தவிர்க்கப்பட்டன` : '') + '.\n' + $('bkNote').textContent;
+    } catch(err) { $('bkNote').textContent = '⚠ இது சரியான backup கோப்பு அல்ல; எதுவும் மாற்றப்படவில்லை.'; }
+  };
+  fr.onerror = () => { $('bkNote').textContent = '⚠ கோப்பைப் படிக்க முடியவில்லை.'; };
+  fr.readAsText(f);
+};
+showBook();
 
 $('shop').textContent = cfg.name;
 idle();
