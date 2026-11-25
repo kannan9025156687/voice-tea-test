@@ -34,6 +34,19 @@ button.ok{background:#2e9e55;color:#fff}
 .row button{padding:6px 10px;font-size:14px}
 .bk{display:flex;gap:8px;flex-wrap:wrap}
 .bk button{font-size:15px;padding:9px 12px}
+#adds{scrollbar-width:none;display:flex;gap:8px;overflow-x:auto;justify-content:safe center;padding:2px 0;flex-shrink:0}
+#adds::-webkit-scrollbar{display:none}
+#adds button{white-space:nowrap;flex-shrink:0}
+#chips{display:flex;gap:8px;justify-content:center;flex-shrink:0}
+#chips button{font-size:15px;padding:8px 12px}
+#chips button.on{background:#ffd166;color:#3b1f10}
+#setup{overflow-y:auto;justify-content:safe center}
+.irow{display:flex;gap:6px;flex-wrap:wrap;align-items:center;background:#4d2c1a;border-radius:10px;padding:8px}
+.irow input{flex:1;min-width:30%}
+.irow .x{flex:0 0 auto}
+#sErr{color:#ffb4a2;font-size:14px;white-space:pre-line}
+.pre{display:flex;gap:6px;flex-wrap:wrap}
+.pre button{font-size:14px;padding:7px 10px}
 button.hot{outline:3px solid #ffd166}
 .row.fixing{background:#4d2c1a;border-radius:8px;padding:8px 6px}
 #bkNote{font-size:13px;opacity:.85;white-space:pre-line}
@@ -51,11 +64,11 @@ button.hot{outline:3px solid #ffd166}
     <div id="sub"></div>
     <div id="note" hidden>"பணம் வந்தது ✔" என்பது கடைக்காரரின் உறுதிப்படுத்தல் மட்டுமே; bank verification அல்ல.</div>
   </main>
+  <div id="chips" hidden><button class="alt" id="nLs">சர்க்கரை குறைவு</button><button class="alt" id="nPc">பார்சல்</button></div>
+  <div id="adds"></div>
   <div id="heard"></div>
   <footer>
     <button id="start">🎤 தொடங்கு</button>
-    <button class="alt" data-add="tea">+ டீ</button>
-    <button class="alt" data-add="coffee">+ காபி</button>
     <button class="ok" id="confirm" hidden>✔ உறுதி</button>
     <button class="ok" id="paid" hidden>கடைக்காரர்: UPI பணம் வந்தது ✔</button>
     <button class="ok" id="cash" hidden>💵 Cash வந்தது ✔</button>
@@ -84,6 +97,10 @@ button.hot{outline:3px solid #ffd166}
   <label>UPI ID<input id="sUpi" required placeholder="name@bank" pattern="[A-Za-z0-9._\-]+@[A-Za-z0-9.\-]+" autocapitalize="off"></label>
   <label>டீ விலை ₹<input id="sTea" type="number" min="1" required></label>
   <label>காபி விலை ₹<input id="sCoffee" type="number" min="1" required></label>
+  <div id="sItemsH" style="text-align:left;font-size:14px">கூடுதல் பொருட்கள் (விலை நீங்களே உள்ளிடவும்)</div>
+  <div id="sItems"></div>
+  <div class="pre"><button type="button" class="alt" data-pre="பிளாக் டீ|பிளாக் டீ, பிளாக்டீ, பிளாக், black tea">+ பிளாக் டீ</button><button type="button" class="alt" data-pre="பன்|பன், bun">+ பன்</button><button type="button" class="alt" data-pre="பிஸ்கட்|பிஸ்கட், பிஸ்கெட், biscuit">+ பிஸ்கட்</button><button type="button" class="alt" data-pre="|">+ புதிய பொருள்</button></div>
+  <div id="sErr"></div>
   <button>சேமி</button>
   <button type="button" class="alt" id="sCancel">மூடு</button>
 </form>
@@ -93,10 +110,19 @@ button.hot{outline:3px solid #ffd166}
 const $ = id => document.getElementById(id);
 const KEY = 'voiceTeaCfg';
 const NAMES = {tea:'டீ', coffee:'காபி'};
-let cfg = {name:'எங்கள் டீ கடை', upi:'', tea:15, coffee:20};
+let cfg = {name:'எங்கள் டீ கடை', upi:'', tea:15, coffee:20, items:[]};
 try { Object.assign(cfg, JSON.parse(localStorage.getItem(KEY) || '{}')); } catch(e) {}
+// கூடுதல் பொருட்கள்: பழைய settings-ல் items இல்லை; தவறான பதிவுகள் தவிர்க்கப்படும்
+const okItem = i => i && typeof i.id === 'string' && /^x[a-z0-9]+$/.test(i.id) && typeof i.name === 'string' && i.name.length > 0 && i.name.length <= 20 &&
+  Number.isSafeInteger(i.price) && i.price >= 1 && Array.isArray(i.aliases) && i.aliases.every(a => typeof a === 'string' && a);
+cfg.items = Array.isArray(cfg.items) ? cfg.items.filter(okItem).slice(0, 12) : [];
+const KEYS = () => ['tea', 'coffee', ...cfg.items.map(i => i.id)];
+const blank = () => Object.fromEntries(KEYS().map(k => [k, 0]));
+const nameOf = k => NAMES[k] || (cfg.items.find(i => i.id === k) || {name:k}).name;
+const priceOf = k => k === 'tea' ? cfg.tea : k === 'coffee' ? cfg.coffee : (cfg.items.find(i => i.id === k) || {price:0}).price;
+const anyItem = o => KEYS().some(k => o[k]);
 
-let state = 'idle', order = {tea:0, coffee:0}, resetTimer, cur = null;
+let state = 'idle', order = {tea:0, coffee:0}, resetTimer, cur = null, notes = {ls:false, pc:false};
 
 /* ---------- கணக்குப் பதிவு (இந்த போனில் மட்டும்) ---------- */
 const LKEY = 'voiceTeaLog', BKEY = 'voiceTeaBackup';
@@ -108,7 +134,9 @@ function okRec(r){
     Number.isSafeInteger(r.amt) && r.amt >= 0 &&
     ['pending','received','cancelled'].includes(r.status) &&
     (r.status === 'received' ? ['cash','upi'].includes(r.method) : !r.method) &&
-    (r.fix === undefined || (r.fix && ['cash','upi'].includes(r.fix.from) && Number.isFinite(r.fix.at)));
+    (r.fix === undefined || (r.fix && ['cash','upi'].includes(r.fix.from) && Number.isFinite(r.fix.at))) &&
+    (r.x === undefined || (Array.isArray(r.x) && r.x.length <= 20 && r.x.every(e => e && typeof e.id === 'string' && typeof e.name === 'string' && e.name.length <= 40 && Number.isSafeInteger(e.price) && e.price >= 0 && Number.isSafeInteger(e.qty) && e.qty > 0))) &&
+    (r.n === undefined || (r.n && typeof r.n === 'object' && Object.values(r.n).every(v => v === true)));
 }
 function saveLog(){
   try { localStorage.setItem(LKEY, JSON.stringify(log)); storeErr = false; return true; }
@@ -117,6 +145,9 @@ function saveLog(){
 function newRec(){
   cur = {id: Date.now().toString(36) + Math.random().toString(36).slice(2,6), ts: Date.now(),
          tea: order.tea, coffee: order.coffee, amt: total(), status: 'pending'};
+  const x = cfg.items.filter(i => order[i.id]).map(i => ({id:i.id, name:i.name, price:i.price, qty:order[i.id]}));   // பெயர்/விலை அன்றைய நிலை (பின்னர் மாறினாலும் பழைய பதிவு மாறாது)
+  if (x.length) cur.x = x;
+  if (notes.ls || notes.pc) cur.n = Object.assign({}, notes.ls ? {ls:true} : {}, notes.pc ? {pc:true} : {});
   log.push(cur); saveLog();
 }
 function setStatus(r, status, method){
@@ -134,9 +165,11 @@ function daySummary(key){
   return {recs, tea: live.reduce((t,r) => t + r.tea, 0), coffee: live.reduce((t,r) => t + r.coffee, 0),
     sales: sum(() => true), cash: sum(r => r.status === 'received' && r.method === 'cash'),
     upi: sum(r => r.status === 'received' && r.method === 'upi'), pend: live.filter(r => r.status === 'pending'),
-    cancelled: recs.length - live.length, fixed: recs.filter(r => r.fix).length};
+    cancelled: recs.length - live.length, fixed: recs.filter(r => r.fix).length,
+    ex: live.reduce((m, r) => { (r.x || []).forEach(e => { m[e.name] = (m[e.name] || 0) + e.qty; }); return m; }, {}),
+    ls: live.filter(r => r.n && r.n.ls).length, pc: live.filter(r => r.n && r.n.pc).length};
 }
-const total = () => order.tea*cfg.tea + order.coffee*cfg.coffee;
+const total = (o = order) => KEYS().reduce((t, k) => t + (o[k] || 0) * priceOf(k), 0);
 
 /* ---------- குரல் வெளியீடு & உள்ளீடு ---------- */
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -151,7 +184,7 @@ function pickAlt(alts){
   const an = alts.map(analyze);
   let i = an.findIndex(a => a.unclear || (a.item && a.explicit));  // தெளிவான எண் அல்லது தெளிவில்லா எண் உள்ள முதல் மாற்று
   if (i < 0) i = an.findIndex(a => a.item);
-  if (i < 0) i = alts.findIndex(a => isYes(a) || isNo(a) || GREET.test(a));
+  if (i < 0) i = alts.findIndex(a => isYes(a) || isNo(a) || GREET.test(a) || LS_RE.test(a) || PC_RE.test(a));
   return alts[i < 0 ? 0 : i];
 }
 
@@ -233,24 +266,29 @@ function show(s, big, sub){
   $('paid').hidden = s !== 'pay';
   $('cash').hidden = !(s === 'confirm' || s === 'pay');
   $('cancel').hidden = !(s === 'confirm' || s === 'pay');
-  document.querySelectorAll('[data-add]').forEach(b => b.hidden = s === 'pay' || s === 'done');
+  $('adds').hidden = s === 'pay' || s === 'done';
+  $('chips').hidden = s !== 'confirm';
 }
 function idle(){
   cur = null;
-  order = {tea:0, coffee:0};
-  show('idle', 'வணக்கம் 🙏', `"வணக்கம்" சொல்லுங்கள்\nடீ ₹${cfg.tea}  •  காபி ₹${cfg.coffee}`);
+  order = blank(); notes = {ls:false, pc:false};
+  show('idle', 'வணக்கம் 🙏', `"வணக்கம்" சொல்லுங்கள்\n` + KEYS().map(k => `${nameOf(k)} ₹${priceOf(k)}`).join('  •  '));
 }
 function greet(){
   show('order', 'வணக்கம் 🙏', 'எங்களிடம் டீ மற்றும் காபி உள்ளது.\nஉங்களுக்கு என்ன வேண்டும்?');
   speak('வணக்கம். எங்களிடம் டீ மற்றும் காபி உள்ளது. உங்களுக்கு என்ன வேண்டும்?');
 }
-function showBill(){
-  const items = Object.keys(order).filter(k => order[k]);
-  const lines = items.map(k => `${order[k]} ${NAMES[k]} × ₹${cfg[k]} = ₹${order[k]*cfg[k]}`);
+const noteTxt = () => [notes.ls ? 'சர்க்கரை குறைவு' : '', notes.pc ? 'பார்சல்' : ''].filter(Boolean);
+function showBill(quiet){
+  const items = KEYS().filter(k => order[k]);
+  const lines = items.map(k => `${order[k]} ${nameOf(k)} × ₹${priceOf(k)} = ₹${order[k]*priceOf(k)}`);
   if (items.length > 1) lines.push(`மொத்தம் ₹${total()}`);
+  if (noteTxt().length) lines.push('📝 ' + noteTxt().join(' • '));
   show('confirm', lines.join('\n'), '"சரி" அல்லது "கன்ஃபார்ம்" என்று சொல்லுங்கள்');
-  const said = items.map(k => `${order[k]} ${NAMES[k]}`).join(' மற்றும் ');
-  speak(`${said}. மொத்தம் ${total()} ரூபாய். சரி என்று சொல்லுங்கள்.`);
+  $('nLs').classList.toggle('on', notes.ls); $('nPc').classList.toggle('on', notes.pc);
+  if (quiet) return;
+  const said = items.map(k => `${order[k]} ${nameOf(k)}`).join(' மற்றும் ');
+  speak(`${said}. ` + (noteTxt().length ? noteTxt().join(', ') + '. ' : '') + `மொத்தம் ${total()} ரூபாய். சரி என்று சொல்லுங்கள்.`);
 }
 function upiLink(amt){
   const q = {pa: cfg.upi.trim(), pn: cfg.name.trim(), am: amt.toFixed(2), cu: 'INR', tn: 'Tea order'};
@@ -289,13 +327,13 @@ function cancel(){ if (cur && cur.status === 'pending') setStatus(cur, 'cancelle
 
 /* ---------- குரலால் திருத்தம்: "ஒரு டீ குறை", "காபி வேண்டாம், டீ மட்டும்" ---------- */
 const isNegW = w => ['வேண்டாம்','வேணாம்','இல்லை','இல்ல','ரத்து','கேன்சல்','cancel','no'].includes(w);
-const isRedW = w => /^(குறை|எடு|நீக்க|remove|less)/.test(w);
+const isRedW = w => /^(குறை(?!வ)|எடு|நீக்க|remove|less)/.test(w);
 const isOnlyW = w => /^(மட்டும்|மட்டுமே|only)/.test(w);
 // திருத்தம் இல்லையெனில் null; இருந்தால் புதிய கூடை
 function correction(w, base){
   const idx = []; w.forEach((x,i) => { if (itemOf(x)) idx.push(i); });
   if (!idx.length) return null;
-  const next = {tea:base.tea, coffee:base.coffee};
+  const next = Object.assign({}, base);
   let hit = false, only = null;
   idx.forEach((i, k) => {
     const it = itemOf(w[i]), prev = k ? idx[k-1] : -1, nx = k+1 < idx.length ? idx[k+1] : w.length;
@@ -315,12 +353,41 @@ const isYes = t => /சரி|ச ரி|ஓகே|ஓக்கே|ஆமா|^\s
 const isNo = t => /வேண்டாம்|வேணாம்|இல்ல|ரத்து|கேன்சல்|cancel|\bno\b/i.test(t);
 const GREET = /வணக்கம்|vanakkam|ஹலோ|hello/i;
 const NUMRE = () => NUMS.flatMap(n => n[1]).filter(w => /[^\x00-\x7f]/.test(w)).sort((x, y) => y.length - x.length).join('|');
-let _numRe; // "இரண்டுடீ", "2டீ" போல ஒட்டிய சொற்களைப் பிரிக்கும்
+let _numRe, _numSig; // "இரண்டுடீ", "2டீ", "இரண்டுபன்" போல ஒட்டிய சொற்களைப் பிரிக்கும்
+const TOK = '\u0001';
+const SUF = /^(கள்|ஐ|ை|ும்|ு|ம்|டு|டை|டுகள்|ட்டு|ட்டை|ட்டுகள்)$/;
+const esc = a => a.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+// ஒவ்வொரு கூடுதல் பொருளின் சொல்வடிவங்கள்; நீண்டது முதலில்
+function aliasList(){
+  const out = [];
+  cfg.items.forEach(i => i.aliases.forEach(a => {
+    const ws = a.toLowerCase().split(/\s+/).filter(Boolean);
+    if (!ws.length) return;
+    out.push({id:i.id, ws});
+    if (ws.length > 1) out.push({id:i.id, ws:[ws.join('')]});
+  }));
+  return out.sort((x, y) => y.ws.length - x.ws.length || y.ws.join('').length - x.ws.join('').length);
+}
 const words = text => {
-  _numRe = _numRe || new RegExp('(' + NUMRE() + ')(?=டீ|டி|காபி|காப்பி|காஃபி)', 'g');
-  return text.toLowerCase().replace(/(\d+)/g, ' $1 ').replace(/[.,!?]/g, ' ').replace(_numRe, '$1 ').split(/\s+/).filter(Boolean);
+  const sig = JSON.stringify(cfg.items.map(i => i.aliases));
+  if (!_numRe || _numSig !== sig){
+    _numSig = sig;
+    const glue = ['டீ','டி','காபி','காப்பி','காஃபி'].concat(aliasList().filter(a => a.ws.length === 1).map(a => esc(a.ws[0])));
+    _numRe = new RegExp('(' + NUMRE() + ')(?=' + glue.join('|') + ')', 'g');
+  }
+  const arr = text.toLowerCase().replace(/(\d+)/g, ' $1 ').replace(/[.,!?]/g, ' ').replace(_numRe, '$1 ').split(/\s+/).filter(Boolean);
+  if (!cfg.items.length) return arr;
+  const al = aliasList(), out = [];
+  for (let i = 0; i < arr.length;){
+    let hit = null;
+    for (const a of al){
+      if (i + a.ws.length > arr.length) continue;
+      if (a.ws.every((x, j) => arr[i+j] === x || (j === a.ws.length-1 && arr[i+j].startsWith(x) && SUF.test(arr[i+j].slice(x.length))))){ hit = a; break; }
+    }
+    if (hit){ out.push(TOK + hit.id); i += hit.ws.length; } else out.push(arr[i++]);
+  }
+  return out;
 };
-const hasItem = t => { const o = parseOrder(words(TAMIL_DIGITS(t.toLowerCase()))); return o.tea || o.coffee; };
 const NUMS = [
   [1,['இன்னொரு','ஒரு','ஒன்று','ஒன்னு','ஒண்ணு','one','a']],
   [2,['இரண்டு','ரெண்டு','இரெண்டு','two']],
@@ -354,11 +421,11 @@ const NUMS = [
 const UNCLEAR_RE = /(^|[^\d.,])[-−–+]\s*\d|\d\s*[.,/]\s*\d|(^|\D)0+(?=\D|$)|பூஜ்ஜிய|பூஜ்ய|சுழி|zero|minus|negative|மைனஸ்|அரை|ஒன்றரை|இரண்டரை|மூன்றரை|நான்கரை|ஐந்தரை|ஆறரை|ஏழரை|எட்டரை|ஒன்பதரை|பத்தரை|கால்|முக்கால்|half|quarter|லட்சம்|இலட்சம்|கோடி|lakh|million|crore|நூற்று|நூற்றி|நூறாயிர|ஆயிரத்து|ஆயிரத்தி|[௦-௯]+\s*[.,/]/i;
 const TAMIL_DIGITS = t => t.replace(/[௦-௯]/g, c => c.charCodeAt(0) - 0x0BE6);
 const numOf = w => /^\d+$/.test(w) ? +w : (NUMS.find(n => n[1].includes(w)) || [0])[0];
-const itemOf = w => /^(டீ|டி$|டியு|டிகள்|தேநீர்|tea|tee$|ti$)/.test(w) ? 'tea' : /^(காபி|காப்பி|காஃபி|கோபி|coffee)/.test(w) ? 'coffee' : null;
+const itemOf = w => w.charCodeAt(0) === 1 ? (cfg.items.some(i => i.id === w.slice(1)) ? w.slice(1) : null) : /^(டீ|டி$|டியு|டிகள்|தேநீர்|tea|tee$|ti$)/.test(w) ? 'tea' : /^(காபி|காப்பி|காஃபி|கோபி|coffee)/.test(w) ? 'coffee' : null;
 
 // எண் பொருளுக்கு முன் ("2 டீ 1 காபி") அல்லது பின் ("டீ 2 காபி 1") வரலாம்; எண் இல்லையெனில் 1
 function parseDetail(words){
-  const found = {tea:0, coffee:0};
+  const found = blank();
   const items = [], nums = [];
   words.forEach((w, i) => {
     const it = itemOf(w);
@@ -387,7 +454,7 @@ const parseOrder = words => parseDetail(words).found;
 function analyze(text){
   const raw = TAMIL_DIGITS(text.toLowerCase());
   const d = parseDetail(words(raw));
-  const item = d.found.tea || d.found.coffee;
+  const item = anyItem(d.found);
   return {item, found:d.found, explicit:d.explicit, unclear: !!item && UNCLEAR_RE.test(raw)};
 }
 
@@ -395,22 +462,40 @@ function askQty(msg){            // cart/நிலையை மாற்றா�
   speak('எண்ணிக்கையை மீண்டும் சொல்லுங்கள்.');
   $('heard').textContent = '❓ ' + msg;
 }
+const LS_RE = /(சர்க்கரை|சக்கரை|சீனி|sugar)\s*(குறைவ\S*|கம்மி\S*|less|low)|(குறைவ\S*|கம்மி\S*|low|less)\s*(சர்க்கரை|சக்கரை|சீனி|sugar)|லோ\s*சுகர்/i;
+const PC_RE = /பார்சல்\S*|parcel|take\s*away|takeaway/i;
+function stripNotes(text){
+  return {ls: LS_RE.test(text), pc: PC_RE.test(text),
+          clean: text.replace(new RegExp(LS_RE.source, 'gi'), ' ').replace(new RegExp(PC_RE.source, 'gi'), ' ')};
+}
 function handle(text){
   $('heard').textContent = '🗣 ' + text;
-  const t = TAMIL_DIGITS(text.toLowerCase()).replace(/(\d+)/g, ' $1 ').replace(/[.,!?]/g, ' ');
-  const w = words(text);
+  const N = stripNotes(text), ct = N.clean;     // "சர்க்கரை குறைவு", "பார்சல்" குறிப்புகளைத் தனியாக எடுத்து, மீதியை மட்டும் பகுப்பாய்வு
+  const t = TAMIL_DIGITS(ct.toLowerCase()).replace(/(\d+)/g, ' $1 ').replace(/[.,!?]/g, ' ');
+  const w = words(ct);
   const has = list => w.some(x => list.includes(x));
   const no = has(['வேண்டாம்','வேணாம்','இல்லை','இல்ல','ரத்து','cancel','கேன்சல்','no']);
-  const A = analyze(text), o = A.found;
+  const A = analyze(ct), o = A.found;
   const gotItem = A.item;
 
+  if ((N.ls || N.pc) && !gotItem){        // குறிப்பு மட்டும்: பில் திரையில் மட்டுமே; பணம் செலுத்தும்போது மாற்றாது
+    if (state !== 'confirm') return;
+    const on = !no;
+    if (N.ls) notes.ls = on;
+    if (N.pc) notes.pc = on;
+    if (on && isYes(t)) { showBill(true); return pay(); }
+    return showBill();
+  }
   if (state === 'pay'){ if (no) cancel(); return; }       // பணம் வந்ததைக் குரலால் உறுதி செய்ய முடியாது
   if (gotItem && A.unclear && !no) return askQty('எண்ணிக்கை தெளிவில்லை: "' + text + '"');
-  if (gotItem && (state === 'order' || state === 'confirm') && (order.tea || order.coffee)){
+  if (gotItem && (state === 'order' || state === 'confirm') && anyItem(order)){
     const c = correction(w, order);
     if (c){
-      if (!c.tea && !c.coffee) return cancel();
-      order = c; return showBill();
+      if (!anyItem(c)) return cancel();
+      order = c;
+      if (N.ls) notes.ls = true;
+      if (N.pc) notes.pc = true;
+      return showBill();
     }
   }
   if (state === 'done' && !gotItem) return;               // நன்றி சொல்லும் நேரம்; புது order இருந்தால் எடுக்கும்
@@ -420,12 +505,13 @@ function handle(text){
 
   if (gotItem){
     const add = has(['இன்னும்','இன்னொரு','கூட','சேர்த்து','சேர்','also','more']) || w.includes('இன்னொன்னு');
-    const base = (state === 'order' || state === 'confirm') ? order : {tea:0, coffee:0};
-    const next = add ? {tea: base.tea + o.tea, coffee: base.coffee + o.coffee} : o;
-    const amt = next.tea*cfg.tea + next.coffee*cfg.coffee;
-    if (![next.tea, next.coffee, amt].every(Number.isSafeInteger))   // கணக்கிட முடியாத பெரிய எண் மட்டும்
+    const base = (state === 'order' || state === 'confirm') ? order : blank();
+    const next = Object.fromEntries(KEYS().map(k => [k, add ? base[k] + o[k] : o[k]]));
+    const amt = total(next);
+    if (!KEYS().map(k => next[k]).concat(amt).every(Number.isSafeInteger))   // கணக்கிட முடியாத பெரிய எண் மட்டும்
       return askQty('எண்ணிக்கை சரியில்லை');
     order = next;
+    notes = add ? {ls: notes.ls || N.ls, pc: notes.pc || N.pc} : {ls: N.ls, pc: N.pc};
     return showBill();
   }
   if (state === 'confirm' && isYes(t)) return pay();
@@ -433,20 +519,85 @@ function handle(text){
 }
 
 /* ---------- பொத்தான்கள் & அமைப்புகள் ---------- */
+let draft = [];
+const BLOCK_W = a => numOf(a) || /^\d+$/.test(a) || itemOf(a) || isYes(a) || isNo(a) || GREET.test(a) || isNegW(a) || isRedW(a) || isOnlyW(a) ||
+  ['இன்னும்','இன்னொரு','கூட','சேர்','சேர்த்து','also','more'].includes(a) || LS_RE.test(a) || PC_RE.test(a);
+// செய்தி: பிழை இருந்தால் err; இல்லையெனில் items
+function validateItems(list){
+  if (list.length > 12) return {err:'அதிகபட்சம் 12 பொருட்கள்.'};
+  const seen = new Set(), items = [], names = new Set(['டீ','காபி']);
+  for (const d of list){
+    const name = String(d.name || '').trim().replace(/\s+/g, ' ');
+    const price = Number(String(d.price).trim());
+    if (!name || name.length > 20) return {err:'பெயர் 1-20 எழுத்துகள் இருக்க வேண்டும்.'};
+    if (names.has(name.toLowerCase())) return {err:`"${name}" ஏற்கனவே உள்ளது.`};
+    names.add(name.toLowerCase());
+    if (!Number.isSafeInteger(price) || price < 1 || price > 100000) return {err:`"${name}": விலை 1 முதல் 100000 வரை முழு எண்ணாக இருக்க வேண்டும்.`};
+    const aliases = [];
+    for (const a of [name, ...String(d.say || '').split(/[,;\n،]/)]){
+      const x = a.trim().replace(/\s+/g, ' ').toLowerCase();
+      if (!x || aliases.includes(x)) continue;
+      if (x.length < 2) return {err:`"${name}": சொல்லும் பெயர் குறைந்தது 2 எழுத்து.`};
+      if (!x.includes(' ') && BLOCK_W(x)) return {err:`"${x}" என்பது எண் / டீ / காபி / சரி / வேண்டாம் போன்ற சொல்லுடன் குழம்பும்; வேறு பெயர் தரவும்.`};
+      if (seen.has(x)) return {err:`"${x}" இரண்டு பொருட்களில் உள்ளது.`};
+      seen.add(x); aliases.push(x);
+    }
+    items.push({id: d.id && /^x[a-z0-9]+$/.test(d.id) ? d.id : 'x' + Date.now().toString(36) + Math.random().toString(36).slice(2,5), name, price, aliases});
+  }
+  return {items};
+}
+function drawDraft(){
+  const box = $('sItems'); box.textContent = '';
+  draft.forEach((d, n) => {
+    const row = document.createElement('div'); row.className = 'irow';
+    [['name','பெயர்','text'],['price','விலை ₹','number'],['say','சொல்லும் பெயர்கள் (, பிரித்து)','text']].forEach(([f, ph, ty]) => {
+      const inp = document.createElement('input'); inp.type = ty; inp.placeholder = ph; inp.value = d[f];
+      if (f !== 'say') inp.required = true;
+      if (f === 'price') inp.min = 1;
+      inp.oninput = () => { d[f] = inp.value; };
+      row.appendChild(inp);
+    });
+    const x = document.createElement('button'); x.type = 'button'; x.className = 'alt x'; x.textContent = '✖';
+    x.onclick = () => { draft.splice(n, 1); drawDraft(); };
+    row.appendChild(x); box.appendChild(row);
+  });
+}
 function openSetup(){
   $('sName').value = cfg.name; $('sUpi').value = cfg.upi;
   $('sTea').value = cfg.tea; $('sCoffee').value = cfg.coffee;
+  draft = cfg.items.map(i => ({id:i.id, name:i.name, price:String(i.price), say:i.aliases.join(', ')}));
+  $('sErr').textContent = '';
+  drawDraft();
   $('setup').hidden = false;
 }
 $('setup').onsubmit = e => {
   e.preventDefault();
-  cfg = {name:$('sName').value.trim(), upi:$('sUpi').value.trim(), tea:+$('sTea').value|0, coffee:+$('sCoffee').value|0};
+  const v = validateItems(draft);
+  if (v.err){ $('sErr').textContent = v.err; return; }
+  cfg = {name:$('sName').value.trim(), upi:$('sUpi').value.trim(), tea:+$('sTea').value|0, coffee:+$('sCoffee').value|0, items:v.items};
   try { localStorage.setItem(KEY, JSON.stringify(cfg)); } catch(err) {}
   $('shop').textContent = cfg.name;
+  buildAdds();
   $('setup').hidden = true;
   idle();
 };
 $('gear').onclick = openSetup;
+document.querySelectorAll('[data-pre]').forEach(b => b.onclick = () => {
+  const [name, say] = b.dataset.pre.split('|');
+  if (draft.length >= 12) return;
+  draft.push({id:'', name, price:'', say});   // விலை நீங்களே உள்ளிட வேண்டும்
+  drawDraft();
+});
+function buildAdds(){
+  const box = $('adds'); box.textContent = '';
+  KEYS().forEach(k => {
+    const b = document.createElement('button'); b.className = 'alt'; b.textContent = '+ ' + nameOf(k);
+    b.onclick = () => { order[k] = (order[k] || 0) + 1; showBill(); };
+    box.appendChild(b);
+  });
+}
+$('nLs').onclick = () => { notes.ls = !notes.ls; showBill(true); };
+$('nPc').onclick = () => { notes.pc = !notes.pc; showBill(true); };
 const showMute = () => { $('mute').textContent = muted ? '🔇 குரல் இல்லை' : '🔊 குரல்'; };
 $('mute').onclick = () => {
   muted = !muted;
@@ -464,13 +615,13 @@ $('start').onclick = () => {
   if (!speaking) onRecEnd();
   if (navigator.wakeLock) navigator.wakeLock.request('screen').catch(()=>{});
 };
-document.querySelectorAll('[data-add]').forEach(b => b.onclick = () => { order[b.dataset.add]++; showBill(); });
+
 $('confirm').onclick = pay;
 $('paid').onclick = () => paid('upi');
 $('cash').onclick = () => paid('cash');
 $('sCancel').onclick = () => { if (cfg.upi) $('setup').hidden = true; };
 $('cancel').onclick = cancel;
-document.addEventListener('touchmove', e => { if (!(e.target.closest && e.target.closest('#hist, main'))) e.preventDefault(); }, {passive:false});
+document.addEventListener('touchmove', e => { if (!(e.target.closest && e.target.closest('#hist, main, #adds, #setup'))) e.preventDefault(); }, {passive:false});
 
 /* ---------- கணக்குத் திரை & backup ---------- */
 let viewDay = dayKey(Date.now()), fixing = null, nudge = false;
@@ -480,6 +631,8 @@ const lastChange = () => log.reduce((m,r) => Math.max(m, r.ts, r.paidAt || 0, r.
 const backupDue = () => log.length > 0 && lastChange() > lastBackup() && Date.now() - lastBackup() > 864e5;
 function showBook(){ $('book').textContent = storeErr ? '📒❗' : backupDue() ? '📒⚠' : '📒'; }
 function shiftDay(n){ const [y,m,d] = viewDay.split('-').map(Number); viewDay = dayKey(new Date(y, m-1, d+n).getTime()); renderHist(); }
+const exLine = S => Object.keys(S.ex).length ? Object.entries(S.ex).map(([n, q]) => `${n}: ${q}`).join('   ') + '\n' : '';
+const noteLine = S => (S.ls || S.pc) ? `சர்க்கரை குறைவு: ${S.ls}   பார்சல்: ${S.pc}\n` : '';
 const STXT = r => (r.status === 'received' ? (r.method === 'cash' ? '✔ Cash' : '✔ UPI') : r.status === 'pending' ? '⏳ பணம் பெறவில்லை' : '✖ ரத்து') + (r.fix ? ' (திருத்தியது)' : '');
 function renderHist(){
   const S = daySummary(viewDay), today = dayKey(Date.now());
@@ -487,18 +640,20 @@ function renderHist(){
   $('dNext').disabled = viewDay >= today;
   const rcv = S.cash + S.upi;
   $('sum').textContent =
-    `டீ: ${S.tea}   காபி: ${S.coffee}\n` +
+    `டீ: ${S.tea}   காபி: ${S.coffee}\n` + exLine(S) +
     `மொத்த விற்பனை: ₹${S.sales}\n` +
     `பணம் பெற்றது: ₹${rcv}  (Cash ₹${S.cash} + UPI ₹${S.upi})\n` +
     `பணம் பெறாதது: ₹${S.sales - rcv}` + (S.pend.length ? ` (${S.pend.length} ஆர்டர்)` : '') +
     (S.cancelled ? `\nரத்து: ${S.cancelled}` : '') +
     (S.fixed ? `\nதிருத்தப்பட்டவை: ${S.fixed}` : '') +
+    (noteLine(S) ? '\n' + noteLine(S).trim() : '') +
     `\n(கடைக்காரர் அழுத்திய பதிவு மட்டும்; bank சரிபார்ப்பு அல்ல)`;
   const rows = $('rows'); rows.textContent = '';
   S.recs.slice().reverse().forEach(r => {
     const d = new Date(r.ts), div = document.createElement('div'), sp = document.createElement('span');
     div.className = 'row';
-    const what = [r.tea ? r.tea + ' டீ' : '', r.coffee ? r.coffee + ' காபி' : ''].filter(Boolean).join(' + ');
+    const what = [r.tea ? r.tea + ' டீ' : '', r.coffee ? r.coffee + ' காபி' : '', ...(r.x || []).map(e => e.qty + ' ' + e.name)].filter(Boolean).join(' + ') +
+      (r.n ? ' 📝' + [r.n.ls ? 'சர்க்கரை குறைவு' : '', r.n.pc ? 'பார்சல்' : ''].filter(Boolean).join('/') : '');
     sp.textContent = `${p2(d.getHours())}:${p2(d.getMinutes())}  ${what}  ₹${r.amt}  ${STXT(r)}`;
     div.appendChild(sp);
     if (r.status === 'pending') [['Cash','cash'],['UPI','upi']].forEach(([l,m]) => {
@@ -550,19 +705,20 @@ $('bJson').onclick = () => {
   noteBackup(); nudge = false; renderHist();
 };
 $('bCsv').onclick = () => {
-  const head = 'date,time,tea,coffee,amount,status,method';
+  const head = 'date,time,tea,coffee,amount,status,method,extras,notes';
+  const q = v => '"' + String(v).replace(/"/g, '""') + '"';
   const rows = log.slice().sort((a,b) => a.ts - b.ts).map(r => { const d = new Date(r.ts);
-    return [dayKey(r.ts), p2(d.getHours()) + ':' + p2(d.getMinutes()), r.tea, r.coffee, r.amt, r.status, r.method || ''].join(','); });
+    return [dayKey(r.ts), p2(d.getHours()) + ':' + p2(d.getMinutes()), r.tea, r.coffee, r.amt, r.status, r.method || '', q((r.x || []).map(e => e.name + ':' + e.qty).join(';')), q(r.n ? Object.keys(r.n).join(';') : '')].join(','); });
   download(`voice-tea-${dayKey(Date.now())}.csv`, [head, ...rows].join('\n'), 'text/csv');
 };
 function summaryText(key){
   const S = daySummary(key), rcv = S.cash + S.upi;
   return `${cfg.name} - ${key} கணக்கு\n` +
-    `டீ: ${S.tea}, காபி: ${S.coffee}\n` +
+    `டீ: ${S.tea}, காபி: ${S.coffee}\n` + exLine(S) +
     `மொத்த விற்பனை: ₹${S.sales}\n` +
     `பணம் பெற்றது: ₹${rcv} (Cash ₹${S.cash}, UPI ₹${S.upi})\n` +
     `பணம் பெறாதது: ₹${S.sales - rcv}` + (S.pend.length ? ` (${S.pend.length} ஆர்டர்)` : '') +
-    (S.cancelled ? `\nரத்து: ${S.cancelled}` : '') + (S.fixed ? `\nதிருத்தப்பட்டவை: ${S.fixed}` : '') +
+    (S.cancelled ? `\nரத்து: ${S.cancelled}` : '') + (S.fixed ? `\nதிருத்தப்பட்டவை: ${S.fixed}` : '') + (noteLine(S) ? '\n' + noteLine(S).trim() : '') +
     `\n(கடைக்காரர் பதிவு; bank சரிபார்ப்பு அல்ல)`;
 }
 const backupJson = () => JSON.stringify({app:'voice-tea', v:1, exported:Date.now(), orders:log});
@@ -608,6 +764,7 @@ $('bFile').onchange = e => {
 showBook();
 
 $('shop').textContent = cfg.name;
+buildAdds();
 idle();
 if (!cfg.upi) openSetup();
 </script>
