@@ -34,6 +34,8 @@ button.ok{background:#2e9e55;color:#fff}
 .row button{padding:6px 10px;font-size:14px}
 .bk{display:flex;gap:8px;flex-wrap:wrap}
 .bk button{font-size:15px;padding:9px 12px}
+button.hot{outline:3px solid #ffd166}
+.row.fixing{background:#4d2c1a;border-radius:8px;padding:8px 6px}
 #bkNote{font-size:13px;opacity:.85;white-space:pre-line}
 #setup{position:fixed;inset:0;background:#3b1f10;display:flex;flex-direction:column;justify-content:center;gap:8px;padding:20px}
 #setup input{padding:10px;border-radius:8px;border:0;font-size:16px;width:100%}
@@ -63,12 +65,14 @@ button.ok{background:#2e9e55;color:#fff}
 
 <div id="hist" hidden>
   <div class="hh"><button class="alt" id="dPrev">◀</button><b id="dLbl"></b><button class="alt" id="dNext">▶</button><button class="alt" id="hClose">✖ மூடு</button></div>
+  <button class="ok" id="bShare">📤 இன்றைய கணக்கைப் பகிர்</button>
   <div id="sum"></div>
   <div id="rows"></div>
   <div class="bk">
     <button id="bJson">⬇ Backup (JSON)</button>
     <button class="alt" id="bCsv">⬇ CSV</button>
     <button class="alt" id="bRestore">⬆ Restore</button>
+    <button class="alt" id="bShareBk" hidden>📤 Backup பகிர்</button>
   </div>
   <div id="bkNote"></div>
   <input type="file" id="bFile" accept=".json,application/json" hidden>
@@ -103,7 +107,8 @@ function okRec(r){
     Number.isSafeInteger(r.tea) && r.tea >= 0 && Number.isSafeInteger(r.coffee) && r.coffee >= 0 &&
     Number.isSafeInteger(r.amt) && r.amt >= 0 &&
     ['pending','received','cancelled'].includes(r.status) &&
-    (r.status === 'received' ? ['cash','upi'].includes(r.method) : !r.method);
+    (r.status === 'received' ? ['cash','upi'].includes(r.method) : !r.method) &&
+    (r.fix === undefined || (r.fix && ['cash','upi'].includes(r.fix.from) && Number.isFinite(r.fix.at)));
 }
 function saveLog(){
   try { localStorage.setItem(LKEY, JSON.stringify(log)); storeErr = false; return true; }
@@ -115,6 +120,7 @@ function newRec(){
   log.push(cur); saveLog();
 }
 function setStatus(r, status, method){
+  if (r.status === 'received' && status !== 'received') r.fix = {from: r.method, at: Date.now()};   // திருத்தப்பட்டது என்று குறிப்பு
   r.status = status;
   if (status === 'received'){ r.method = method; r.paidAt = Date.now(); } else delete r.method;
   saveLog();
@@ -128,7 +134,7 @@ function daySummary(key){
   return {recs, tea: live.reduce((t,r) => t + r.tea, 0), coffee: live.reduce((t,r) => t + r.coffee, 0),
     sales: sum(() => true), cash: sum(r => r.status === 'received' && r.method === 'cash'),
     upi: sum(r => r.status === 'received' && r.method === 'upi'), pend: live.filter(r => r.status === 'pending'),
-    cancelled: recs.length - live.length};
+    cancelled: recs.length - live.length, fixed: recs.filter(r => r.fix).length};
 }
 const total = () => order.tea*cfg.tea + order.coffee*cfg.coffee;
 
@@ -467,12 +473,14 @@ $('cancel').onclick = cancel;
 document.addEventListener('touchmove', e => { if (!(e.target.closest && e.target.closest('#hist, main'))) e.preventDefault(); }, {passive:false});
 
 /* ---------- கணக்குத் திரை & backup ---------- */
-let viewDay = dayKey(Date.now());
+let viewDay = dayKey(Date.now()), fixing = null, nudge = false;
 const lastBackup = () => { try { return +localStorage.getItem(BKEY) || 0; } catch(e) { return 0; } };
-const backupDue = () => log.length > 0 && Date.now() - lastBackup() > 7*864e5;
+const lastChange = () => log.reduce((m,r) => Math.max(m, r.ts, r.paidAt || 0, r.fix ? r.fix.at : 0), 0);
+// சேமிக்காத மாற்றம் இருந்து, கடைசி backup 24 மணி நேரத்துக்கு மேல் (அல்லது இல்லை)
+const backupDue = () => log.length > 0 && lastChange() > lastBackup() && Date.now() - lastBackup() > 864e5;
 function showBook(){ $('book').textContent = storeErr ? '📒❗' : backupDue() ? '📒⚠' : '📒'; }
 function shiftDay(n){ const [y,m,d] = viewDay.split('-').map(Number); viewDay = dayKey(new Date(y, m-1, d+n).getTime()); renderHist(); }
-const STXT = r => r.status === 'received' ? (r.method === 'cash' ? '✔ Cash' : '✔ UPI') : r.status === 'pending' ? '⏳ பணம் பெறவில்லை' : '✖ ரத்து';
+const STXT = r => (r.status === 'received' ? (r.method === 'cash' ? '✔ Cash' : '✔ UPI') : r.status === 'pending' ? '⏳ பணம் பெறவில்லை' : '✖ ரத்து') + (r.fix ? ' (திருத்தியது)' : '');
 function renderHist(){
   const S = daySummary(viewDay), today = dayKey(Date.now());
   $('dLbl').textContent = viewDay === today ? 'இன்று ' + viewDay : viewDay;
@@ -484,6 +492,7 @@ function renderHist(){
     `பணம் பெற்றது: ₹${rcv}  (Cash ₹${S.cash} + UPI ₹${S.upi})\n` +
     `பணம் பெறாதது: ₹${S.sales - rcv}` + (S.pend.length ? ` (${S.pend.length} ஆர்டர்)` : '') +
     (S.cancelled ? `\nரத்து: ${S.cancelled}` : '') +
+    (S.fixed ? `\nதிருத்தப்பட்டவை: ${S.fixed}` : '') +
     `\n(கடைக்காரர் அழுத்திய பதிவு மட்டும்; bank சரிபார்ப்பு அல்ல)`;
   const rows = $('rows'); rows.textContent = '';
   S.recs.slice().reverse().forEach(r => {
@@ -496,6 +505,18 @@ function renderHist(){
       const b = document.createElement('button'); b.className = 'ok'; b.textContent = l + ' ✔';
       b.onclick = () => { setStatus(r, 'received', m); renderHist(); }; div.appendChild(b);
     });
+    if (r.status === 'received'){
+      const b = document.createElement('button'); b.className = 'alt'; b.textContent = '↩ திருத்து';
+      b.onclick = () => { fixing = r.id; renderHist(); }; div.appendChild(b);
+      if (fixing === r.id){
+        div.className = 'row fixing';
+        const q = document.createElement('span'); q.textContent = 'தவறாக அழுத்தினீர்களா? இந்த ₹' + r.amt + ' பதிவை மாற்றவா? (குறிப்புடன் பதிவாகும்)'; div.appendChild(q);
+        [['பணம் வரவில்லை ⏳','pending','ok'],['ரத்து ✖','cancelled','alt'],['வேண்டாம்',null,'alt']].forEach(([l,st,cl]) => {
+          const x = document.createElement('button'); x.className = cl; x.textContent = l;
+          x.onclick = () => { if (st) setStatus(r, st); fixing = null; renderHist(); }; div.appendChild(x);
+        });
+      }
+    }
     if (r.status === 'pending'){
       const b = document.createElement('button'); b.className = 'alt'; b.textContent = '✖';
       b.onclick = () => { setStatus(r, 'cancelled'); renderHist(); }; div.appendChild(b);
@@ -505,13 +526,16 @@ function renderHist(){
   $('bkNote').textContent = backupDue()
     ? '⚠ Backup எடுக்கவும்: ' + (lastBackup() ? 'கடைசி backup ' + dayKey(lastBackup()) : 'இன்னும் எடுக்கவில்லை')
     : (lastBackup() ? 'கடைசி backup: ' + dayKey(lastBackup()) : '') ;
+  $('bJson').className = nudge || backupDue() ? 'hot' : '';
+  $('bShareBk').hidden = !canShareFile();
+  if (nudge) $('bkNote').textContent = '👉 கணக்கைப் பகிர்ந்தாகிவிட்டது. இப்போது Backup-ம் எடுத்து வைக்கவும்.\n' + $('bkNote').textContent;
   if (storeErr) $('bkNote').textContent = '❗ கணக்கைச் சேமிக்க முடியவில்லை; உடனே Backup எடுக்கவும்.\n' + $('bkNote').textContent;
   $('bkNote').textContent += '\nபதிவுகள் இந்த போன் / Chrome-இல் மட்டும் உள்ளன; Chrome data அழிந்தால் போகும். Backup (UPI ID இல்லை) எடுத்து வைக்கவும்.';
   showBook();
 }
-function openBook(){ viewDay = dayKey(Date.now()); renderHist(); $('hist').hidden = false; }
+function openBook(){ nudge = false; fixing = null; viewDay = dayKey(Date.now()); renderHist(); $('hist').hidden = false; }
 $('book').onclick = openBook;
-$('hClose').onclick = () => { $('hist').hidden = true; };
+$('hClose').onclick = () => { $('hist').hidden = true; nudge = false; fixing = null; };
 $('dPrev').onclick = () => shiftDay(-1);
 $('dNext').onclick = () => shiftDay(1);
 function download(name, text, type){
@@ -523,13 +547,44 @@ function download(name, text, type){
 function noteBackup(){ try { localStorage.setItem(BKEY, String(Date.now())); } catch(e) {} }
 $('bJson').onclick = () => {
   download(`voice-tea-backup-${dayKey(Date.now())}.json`, JSON.stringify({app:'voice-tea', v:1, exported:Date.now(), orders:log}), 'application/json');
-  noteBackup(); renderHist();
+  noteBackup(); nudge = false; renderHist();
 };
 $('bCsv').onclick = () => {
   const head = 'date,time,tea,coffee,amount,status,method';
   const rows = log.slice().sort((a,b) => a.ts - b.ts).map(r => { const d = new Date(r.ts);
     return [dayKey(r.ts), p2(d.getHours()) + ':' + p2(d.getMinutes()), r.tea, r.coffee, r.amt, r.status, r.method || ''].join(','); });
   download(`voice-tea-${dayKey(Date.now())}.csv`, [head, ...rows].join('\n'), 'text/csv');
+};
+function summaryText(key){
+  const S = daySummary(key), rcv = S.cash + S.upi;
+  return `${cfg.name} - ${key} கணக்கு\n` +
+    `டீ: ${S.tea}, காபி: ${S.coffee}\n` +
+    `மொத்த விற்பனை: ₹${S.sales}\n` +
+    `பணம் பெற்றது: ₹${rcv} (Cash ₹${S.cash}, UPI ₹${S.upi})\n` +
+    `பணம் பெறாதது: ₹${S.sales - rcv}` + (S.pend.length ? ` (${S.pend.length} ஆர்டர்)` : '') +
+    (S.cancelled ? `\nரத்து: ${S.cancelled}` : '') + (S.fixed ? `\nதிருத்தப்பட்டவை: ${S.fixed}` : '') +
+    `\n(கடைக்காரர் பதிவு; bank சரிபார்ப்பு அல்ல)`;
+}
+const backupJson = () => JSON.stringify({app:'voice-tea', v:1, exported:Date.now(), orders:log});
+function canShareFile(){
+  try { return !!(navigator.canShare && typeof File === 'function' && navigator.canShare({files:[new File(['{}'], 'b.json', {type:'application/json'})]})); }
+  catch(e) { return false; }
+}
+$('bShare').onclick = async () => {
+  const text = summaryText(viewDay);
+  try {
+    if (navigator.share) await navigator.share({text});
+    else if (navigator.clipboard) { await navigator.clipboard.writeText(text); $('bkNote').textContent = 'கணக்கு copy ஆனது; WhatsApp-ல் paste செய்யவும்.'; }
+    else { window.open('https://wa.me/?text=' + encodeURIComponent(text), '_blank'); }
+  } catch(e) { if (e && e.name === 'AbortError') return; $('bkNote').textContent = '⚠ பகிர முடியவில்லை.'; return; }   // பயனர் மூடினால் எதுவும் செய்யாது
+  nudge = true; renderHist();
+};
+$('bShareBk').onclick = async () => {
+  try {
+    const f = new File([backupJson()], `voice-tea-backup-${dayKey(Date.now())}.json`, {type:'application/json'});
+    await navigator.share({files:[f]});
+    noteBackup(); nudge = false; renderHist();
+  } catch(e) { if (!(e && e.name === 'AbortError')) $('bkNote').textContent = '⚠ Backup பகிர முடியவில்லை; ⬇ Backup (JSON) பயன்படுத்தவும்.'; }
 };
 $('bRestore').onclick = () => $('bFile').click();
 $('bFile').onchange = e => {
