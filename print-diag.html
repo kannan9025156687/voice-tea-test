@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="ta"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Printer test</title>
+<style>
+body{font:16px system-ui,sans-serif;margin:12px;background:#fafafa}
+button{display:block;width:100%;padding:14px;margin:8px 0;font-size:17px;border-radius:10px;border:1px solid #888;background:#fff}
+#log{white-space:pre-wrap;font:13px monospace;background:#111;color:#8f8;padding:8px;border-radius:8px;min-height:120px}
+</style></head><body>
+<h3>பிரிண்டர் சோதனை (Test only)</h3>
+<button id="b1">1. பிரிண்டரை இணை (ஒரே முறை)</button>
+<button id="b2">2. Token பிரிண்ட் (தட்டி)</button>
+<button id="b4">2ஆ. முக்கியம்: 10 வினாடி கழித்து தட்டாமல் பிரிண்ட் (முதலில் 1 தட்டுங்கள்)</button>
+<button id="b3">3. விருப்பம்: Reload செய்தபின் தட்டாமல் பிரிண்ட் ஆகுமா (அனுமதி நிலைக்குமா)</button>
+<div id="log"></div>
+<script>
+var port=null,L=document.getElementById('log');
+function log(m){L.textContent+=m+'\n'}
+log('Chrome: '+(navigator.userAgent.match(/Chrome\/[\d.]+/)||['?'])[0]);
+log('Web Serial: '+(navigator.serial?'ஆம்':'இல்லை'));
+async function openPort(p){
+  if(!p.readable&&!p.writable){await p.open({baudRate:9600});}
+  port=p;
+}
+async function send(bytes){
+  var w=port.writable.getWriter();
+  try{
+    for(var i=0;i<bytes.length;i+=512){await w.write(bytes.slice(i,i+512));}
+  }finally{w.releaseLock();}
+}
+function tokenBytes(label){
+  // Tamil cannot use printer fonts: draw on canvas, send as raster bitmap (GS v 0). 384 dots = 48 mm
+  var W=384,H=170,c=document.createElement('canvas');c.width=W;c.height=H;
+  var x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,W,H);x.fillStyle='#000';
+  x.textAlign='center';x.font='bold 30px sans-serif';x.fillText('TEST டோக்கன்',W/2,45);
+  x.font='bold 72px sans-serif';x.fillText(label,W/2,125);
+  x.font='18px sans-serif';x.fillText(new Date().toLocaleTimeString(),W/2,158);
+  var d=x.getImageData(0,0,W,H).data,wb=W/8,out=[0x1B,0x40,0x1D,0x76,0x30,0,wb&255,wb>>8,H&255,H>>8];
+  for(var y=0;y<H;y++)for(var b=0;b<wb;b++){var v=0;for(var k=0;k<8;k++){var i=((y*W)+b*8+k)*4;if(d[i]<128)v|=0x80>>k}out.push(v)}
+  out.push(0x0A,0x0A,0x0A,0x0A);
+  return new Uint8Array(out);
+}
+var n=0;
+async function printTok(){
+  n++;await send(tokenBytes('#'+String(n).padStart(3,'0')));log('அனுப்பப்பட்டது (பிரிண்ட் வந்ததா என்று காகிதத்தில் பாருங்கள்)');
+}
+document.getElementById('b1').onclick=async function(){
+  try{if(!navigator.serial){log('இந்த Chrome-ல் Web Serial இல்லை');return}var p=await navigator.serial.requestPort();await openPort(p);log('இணைந்தது');}
+  catch(e){log('பிழை: '+e.name+' '+e.message)}
+};
+document.getElementById('b2').onclick=async function(){
+  try{if(!port){log('முதலில் 1 தட்டுங்கள்');return}await printTok()}catch(e){log('பிழை: '+e.name+' '+e.message)}
+};
+// Test 3: no tap. On load, ask for already-granted ports, open, print after 5 s. No gesture involved.
+(async function(){
+  if(!navigator.serial)return;
+  try{
+    var ps=await navigator.serial.getPorts();
+    log('முன்பு அனுமதித்த போர்ட்: '+ps.length);
+    if(ps.length&&sessionStorage.getItem('auto')==='1'){
+      log('5 வினாடியில் தானாக பிரிண்ட்...');
+      setTimeout(async function(){
+        try{await openPort(ps[0]);await printTok();}catch(e){log('தானாக பிரிண்ட் பிழை: '+e.name+' '+e.message)}
+      },5000);
+    }
+  }catch(e){log('getPorts பிழை: '+e.name)}
+})();
+document.getElementById('b4').onclick=function(){
+  if(!port){log('முதலில் 1 தட்டுங்கள்');return}
+  log('10 வினாடியில் தானாக பிரிண்ட்; திரையைத் தொடாதீர்கள்...');
+  setTimeout(async function(){try{await printTok();log('தட்டாமல் எழுதியது: வெற்றி')}catch(e){log('தானாக எழுத பிழை: '+e.name+' '+e.message)}},10000);
+};
+document.getElementById('b3').onclick=function(){sessionStorage.setItem('auto','1');location.reload()};
+</script></body></html>
